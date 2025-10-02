@@ -1,0 +1,66 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+dist/
+build/
+*.log
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.venv*/
+
+# Jupyter / Streamlit cache
+.ipynb_checkpoints
+.streamlit/
+*.db
+
+# ---- Node / React Native (Expo) ----
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+.expo/
+.expo-shared/
+.expo-dev/
+.expo-packager/
+*.expo
+*.expo.*
+*.expo-shared
+*.expo-cache
+
+# Metro bundler / cache
+.expo/
+.expo-shared/
+.expo-cache/
+.expo-dev/
+.expo-packager/
+*.packager-cache
+*.expo-settings
+
+# React Native build outputs
+android/app/build/
+ios/build/
+ios/Pods/
+*.xcworkspace
+*.xcodeproj
+*.xcuserstate
+*.xcuserdata/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+
+# ---- OS / IDE Files ----
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
