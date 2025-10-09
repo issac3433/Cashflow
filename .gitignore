@@ -16,6 +16,7 @@ venv/
 env/
 ENV/
 .venv*/
+.env/
 
 # Jupyter / Streamlit cache
 .ipynb_checkpoints
