@@ -1,12 +1,12 @@
 from fastapi import APIRouter
 from sqlmodel import Session
-from ..db import engine
+from app.db import engine
 from ..services.forecast import monthly_cashflow_forecast
 from pydantic import BaseModel
 from typing import Optional
 from datetime import date
 
-router = APIRouter(prefix="/forecasts", tags=["forecasts"])
+router = APIRouter(tags=["forecasts"])
 
 class ForecastRequest(BaseModel):
     portfolio_id: int

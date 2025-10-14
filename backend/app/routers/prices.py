@@ -1,14 +1,14 @@
-from fastapi import APIRouter
-from ..services.prices import fetch_latest_price
+from fastapi import APIRouter, Query
+from typing import List, Dict, Optional
+from app.services.prices import fetch_latest_price, batch_fetch_latest_prices
 
-router = APIRouter(prefix="/prices", tags=["prices"])
+router = APIRouter(tags=["prices"])
 
-@router.get("/quote/{symbol}")
-def quote(symbol: str):
+@router.get("/latest/{symbol}")
+def latest_price(symbol: str) -> Dict[str, Optional[float]]:
     px = fetch_latest_price(symbol)
-    return {
-        "symbol": symbol.upper(),
-        "price": px,
-        "source": "polygon_prev_close" if px else "fallback",
-        "ok": px is not None
-    }
+    return {"symbol": symbol.upper(), "price": px}
+
+@router.get("/latest")
+def latest_prices(symbols: List[str] = Query(..., description="Repeat ?symbols=AAPL&symbols=MSFT")):
+    return batch_fetch_latest_prices(symbols)

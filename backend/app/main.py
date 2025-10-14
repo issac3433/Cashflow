@@ -1,39 +1,33 @@
-import uvicorn
-from fastapi import FastAPI, Depends
+# app/main.py
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .core.config import settings
-from .db import init_db
-from .core.security import get_current_user_id
-from .routers import users, portfolios, holdings, dividends, forecasts, prices, symbols
-from .routers import holdings_quotes
+from app.db import create_db_and_tables
+from app.routers import users, portfolios, holdings, dividends, forecasts, prices, symbols, auth, profile
 
+app = FastAPI(title="Cashflow API", version="1.0.0")
 
-app = FastAPI(title="Cashflow API")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
+
+@app.on_event("startup")
+def on_startup():
+    create_db_and_tables()
+
+app.include_router(users.router,      prefix="",      tags=["users"])
+app.include_router(portfolios.router, prefix="/portfolios", tags=["portfolios"])
+app.include_router(holdings.router,   prefix="/holdings",   tags=["holdings"])
+app.include_router(prices.router,     prefix="/prices",     tags=["prices"])
+app.include_router(dividends.router,  prefix="",  tags=["dividends"])
+app.include_router(forecasts.router,  prefix="/forecasts",  tags=["forecasts"])
+app.include_router(symbols.router,    prefix="/symbols",    tags=["symbols"])
+app.include_router(auth.router,       prefix="",            tags=["auth"])
+app.include_router(profile.router,    prefix="",            tags=["profile"])    
 
 @app.get("/health")
 def health():
     return {"ok": True}
-
-@app.get("/auth/debug")
-def auth_debug(user_id: str = Depends(get_current_user_id)):
-    return {"user_id": user_id}
-
-app.include_router(users.router)
-app.include_router(portfolios.router)
-app.include_router(holdings.router)
-app.include_router(dividends.router)
-app.include_router(forecasts.router)
-app.include_router(prices.router)  
-app.include_router(symbols.router)
-app.include_router(holdings_quotes.router)
-
-def start():
-    init_db()
-    uvicorn.run("app.main:app", host=settings.API_HOST, port=settings.API_PORT, reload=True)
-
-if __name__ == "__main__":
-    start()

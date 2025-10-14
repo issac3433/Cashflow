@@ -1,7 +1,7 @@
 import pandas as pd
 from datetime import date
 from sqlmodel import Session, select
-from ..models import Holding, DividendEvent
+from app.models import Holding, DividendEvent
 
 def monthly_cashflow_forecast(session: Session, portfolio_id: int, months: int = 12,
                                assume_reinvest: bool = True, recurring_deposit: float = 0.0,

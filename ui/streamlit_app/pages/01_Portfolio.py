@@ -1,136 +1,275 @@
 import streamlit as st
 from utils.api import api_get, api_post
 import pandas as pd
+import plotly.express as px
+from datetime import datetime
 
 st.set_page_config(page_title="Portfolio", page_icon="📁", layout="wide")
+
 if not st.session_state.get("is_authed"):
     st.switch_page("Login.py")
 
-st.title("📁 Portfolio")
+st.title("📁 Portfolio Management")
 
-# ----------------- Portfolios -----------------
-st.subheader("My Portfolios")
-
-if st.button("Load Portfolios"):
-    st.session_state["portfolios"] = api_get("/portfolios")
-
-ports = st.session_state.get("portfolios", [])
-if ports:
-    df_ports = pd.DataFrame(ports)
-    if not df_ports.empty:
-        st.dataframe(df_ports, use_container_width=True)
-    else:
-        st.caption("No portfolios yet.")
-else:
-    st.caption("Click **Load Portfolios** to fetch.")
-
-with st.expander("Create Portfolio"):
-    name = st.text_input("Name", "Default", key="p_name")
-    if st.button("Create", key="p_create"):
-        p = api_post("/portfolios", json=None if name == "Default" else {"name": name})
-        st.success(f"Created portfolio #{p.get('id')}")
-        st.session_state.pop("portfolios", None)
-
-st.divider()
-
-# ----------------- Holdings -----------------
-st.subheader("Holdings")
-
-pid = st.number_input("Portfolio ID", min_value=1, step=1, value=1, key="pid")
-
-# 🔎 Type-ahead search with prices
-st.write("Search and select a symbol/company:")
-query = st.text_input(
-    "Type to search",
-    value=st.session_state.get("search_q", ""),
-    key="search_q",
-    placeholder="e.g., apple, nvda, msft"
-)
-
-suggestions = []
-if len(query.strip()) >= 2:
+# ----------------- Portfolio Selector -----------------
+@st.cache_data(ttl=60)
+def load_portfolios():
+    """Load user portfolios with caching."""
     try:
-        res = api_get(f"/symbols/suggest?q={query.strip()}&limit=10")
-        suggestions = res.get("results", [])
+        return api_get("/portfolios")
     except Exception as e:
-        st.warning(f"Search error: {e}")
+        st.error(f"Failed to load portfolios: {e}")
+        return []
 
-# Build dropdown labels
-options = []
-for r in suggestions:
-    px = r.get("price")
-    price_txt = f"${px:,.2f}" if (px is not None) else "n/a"
-    label = f"{r['symbol']} — {r.get('name','')[:60]} ({price_txt})"
-    options.append(label)
+portfolios = load_portfolios()
 
-sel = st.selectbox("Matches", options or ["No matches"], index=0, disabled=not options)
+if not portfolios:
+    st.warning("No portfolios found. Create your first portfolio below!")
+    with st.expander("Create Portfolio", expanded=True):
+        name = st.text_input("Portfolio Name", value="My Portfolio")
+        if st.button("Create Portfolio"):
+            try:
+                result = api_post("/portfolios", json={"name": name})
+                st.success(f"Created portfolio: {result['name']}")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to create portfolio: {e}")
+    st.stop()
 
-# Derive selected symbol + price
-selected_symbol = ""
-selected_price = None
-if options:
-    i = options.index(sel)
-    selected_symbol = suggestions[i]["symbol"]
-    selected_price = suggestions[i].get("price")
-
-# Inputs to add holding
-col_a, col_b, col_c = st.columns([1, 1, 1])
-with col_a:
-    symbol_input = st.text_input("Symbol", value=selected_symbol or "AAPL", key="symbol_input").upper()
-with col_b:
-    shares = st.number_input("Shares", min_value=0.0, value=5.0, key="shares")
-with col_c:
-    use_latest = st.checkbox("Use latest price", value=True, key="use_latest")
-
-if selected_symbol:
-    st.caption(f"Suggested: {selected_symbol} ≈ {f'${selected_price:,.2f}' if selected_price is not None else 'n/a'}")
-
-avg_price = st.number_input(
-    "Avg Price (ignored if 'Use latest price' checked)",
-    min_value=0.0,
-    value=float(selected_price or 0.0),
-    key="avg_price",
-    disabled=use_latest
+# Portfolio selector
+portfolio_options = {f"{p['name']} (ID: {p['id']})": p for p in portfolios}
+selected_name = st.selectbox(
+    "Select Portfolio",
+    options=list(portfolio_options.keys()),
+    key="portfolio_selector"
 )
 
-# Add holding button
-if st.button("Add Holding"):
-    payload = {
-        "portfolio_id": int(pid),
-        "symbol": symbol_input,
-        "shares": float(shares),
-        "avg_price": None if use_latest else float(avg_price),
-    }
-    res = api_post("/holdings", json=payload)
-    st.success(f"Added holding #{res['holding']['id']} (price used: ${res['quote_used']:,.2f})")
+selected_portfolio = portfolio_options[selected_name]
 
-    # Immediate refresh of holdings with quotes
-    rows = api_get(f"/holdings/with-quotes?portfolio_id={int(pid)}")
-    st.session_state["holdings_q"] = rows
+# ----------------- Portfolio Overview -----------------
+st.subheader(f"📊 {selected_portfolio['name']} Overview")
 
-# Load holdings (with quotes)
-if st.button("Load Holdings (with quotes)"):
-    rows = api_get(f"/holdings/with-quotes?portfolio_id={int(pid)}")
-    st.session_state["holdings_q"] = rows
+@st.cache_data(ttl=30)
+def load_portfolio_details(portfolio_id):
+    """Load detailed portfolio information with error handling."""
+    try:
+        return api_get(f"/portfolios/{portfolio_id}")
+    except Exception as e:
+        st.error(f"Failed to load portfolio details: {e}")
+        # Return a fallback structure
+        return {
+            "portfolio": {"id": portfolio_id, "name": "Unknown", "created_at": "Unknown"},
+            "holdings": [],
+            "total_value": 0.0,
+            "holdings_count": 0
+        }
 
-# Display holdings table
-holdings = st.session_state.get("holdings_q", [])
-if holdings:
-    df = pd.DataFrame(holdings)
-    cols_order = [
-        "id", "symbol", "shares", "avg_price",
-        "latest_price", "market_value", "portfolio_id", "reinvest_dividends"
-    ]
-    df = df[[c for c in cols_order if c in df.columns]]
-    st.dataframe(df, use_container_width=True)
+portfolio_data = load_portfolio_details(selected_portfolio['id'])
+
+if portfolio_data:
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Total Value", f"${portfolio_data['total_value']:,.2f}")
+    with col2:
+        st.metric("Holdings", portfolio_data['holdings_count'])
+    with col3:
+        avg_value = portfolio_data['total_value'] / max(portfolio_data['holdings_count'], 1)
+        st.metric("Avg Position", f"${avg_value:,.2f}")
+    with col4:
+        st.metric("Created", portfolio_data['portfolio']['created_at'][:10])
+
+# ----------------- Holdings Table -----------------
+st.subheader("📈 Holdings")
+
+if portfolio_data and portfolio_data['holdings']:
+    holdings_df = pd.DataFrame(portfolio_data['holdings'])
+    
+    # Calculate additional columns
+    holdings_df['gain_loss'] = (holdings_df['latest_price'] - holdings_df['avg_price']) * holdings_df['shares']
+    holdings_df['gain_loss_pct'] = ((holdings_df['latest_price'] - holdings_df['avg_price']) / holdings_df['avg_price'] * 100).round(2)
+    
+    # Format columns
+    holdings_df['avg_price'] = holdings_df['avg_price'].apply(lambda x: f"${x:.2f}")
+    holdings_df['latest_price'] = holdings_df['latest_price'].apply(lambda x: f"${x:.2f}")
+    holdings_df['market_value'] = holdings_df['market_value'].apply(lambda x: f"${x:,.2f}")
+    holdings_df['gain_loss'] = holdings_df['gain_loss'].apply(lambda x: f"${x:,.2f}")
+    holdings_df['gain_loss_pct'] = holdings_df['gain_loss_pct'].apply(lambda x: f"{x:.1f}%")
+    
+    # Display table
+    st.dataframe(
+        holdings_df[['symbol', 'shares', 'avg_price', 'latest_price', 'market_value', 'gain_loss', 'gain_loss_pct']],
+        use_container_width=True,
+        column_config={
+            "symbol": "Symbol",
+            "shares": "Shares",
+            "avg_price": "Avg Price",
+            "latest_price": "Current Price",
+            "market_value": "Value",
+            "gain_loss": "P&L",
+            "gain_loss_pct": "P&L %"
+        }
+    )
+    
+    # Portfolio allocation chart
+    if len(holdings_df) > 1:
+        st.subheader("📊 Portfolio Allocation")
+        
+        # Create chart data
+        chart_data = holdings_df[['symbol', 'market_value']].copy()
+        chart_data['market_value'] = chart_data['market_value'].str.replace('$', '').str.replace(',', '').astype(float)
+        
+        # Create pie chart
+        fig = px.pie(
+            chart_data, 
+            values='market_value', 
+            names='symbol',
+            title="Portfolio Allocation by Value"
+        )
+        fig.update_traces(
+            textposition='inside', 
+            textinfo='percent+label',
+            hovertemplate='<b>%{label}</b><br>Value: $%{value:,.2f}<br>Percentage: %{percent}<extra></extra>'
+        )
+        fig.update_layout(
+            showlegend=True,
+            legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.01)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Also show a simple breakdown
+        st.write("**Holdings Breakdown:**")
+        for _, row in chart_data.iterrows():
+            percentage = (row['market_value'] / chart_data['market_value'].sum()) * 100
+            st.write(f"• {row['symbol']}: ${row['market_value']:,.2f} ({percentage:.1f}%)")
 else:
-    st.caption("Click **Load Holdings (with quotes)** to fetch.")
+    st.info("No holdings in this portfolio yet. Add some below!")
 
-st.divider()
+# ----------------- Add Holdings -----------------
+st.subheader("➕ Add Holdings")
 
-# ----------------- Dividends -----------------
-st.subheader("Dividends")
-sym_for_div = st.text_input("Refresh dividends for symbol", "AAPL", key="div_symbol").upper()
-if st.button("Refresh Dividends"):
-    res = api_post(f"/dividends/refresh/{sym_for_div}")
-    st.success(f"Inserted {res.get('inserted', 0)} events")
+with st.expander("Add New Holding", expanded=False):
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Unified stock search with suggestions
+        st.write("**Search for a stock:**")
+        
+        # Initialize session state for search
+        if "stock_search_query" not in st.session_state:
+            st.session_state["stock_search_query"] = ""
+        if "stock_search_results" not in st.session_state:
+            st.session_state["stock_search_results"] = []
+        if "selected_stock_symbol" not in st.session_state:
+            st.session_state["selected_stock_symbol"] = None
+        
+        # Search input
+        search_query = st.text_input(
+            "Type to search",
+            value=st.session_state["stock_search_query"],
+            key="stock_search_input",
+            placeholder="e.g., apple, tesla, microsoft",
+            help="Type at least 2 characters and press Enter to search"
+        )
+        
+        # Update search query in session state
+        if search_query != st.session_state["stock_search_query"]:
+            st.session_state["stock_search_query"] = search_query
+            st.session_state["stock_search_results"] = []
+            st.session_state["selected_stock_symbol"] = None
+        
+        # Search for stocks when query is long enough
+        if search_query and len(search_query.strip()) >= 2:
+            if not st.session_state["stock_search_results"]:
+                try:
+                    with st.spinner("Searching..."):
+                        search_results = api_get(f"/symbols/suggest?q={search_query}&limit=10")
+                        st.session_state["stock_search_results"] = search_results.get("results", [])
+                except Exception as e:
+                    st.error(f"Search error: {e}")
+                    st.session_state["stock_search_results"] = []
+            
+            # Show search results as selectbox
+            if st.session_state["stock_search_results"]:
+                # Create display options
+                options = ["Select a stock..."] + [
+                    f"{result['symbol']} - {result['name']} (${result.get('price') or 0:.2f})"
+                    for result in st.session_state["stock_search_results"]
+                ]
+                
+                selected_option = st.selectbox(
+                    "Choose from results:",
+                    options=options,
+                    key="stock_selection"
+                )
+                
+                if selected_option and selected_option != "Select a stock...":
+                    # Extract symbol from selection
+                    symbol = selected_option.split(" - ")[0]
+                    st.session_state["selected_stock_symbol"] = symbol
+                    st.success(f"✅ Selected: {symbol}")
+                else:
+                    st.session_state["selected_stock_symbol"] = None
+            else:
+                st.info("No stocks found. Try a different search term.")
+        else:
+            st.session_state["selected_stock_symbol"] = None
+        
+        # Show selected stock
+        if st.session_state["selected_stock_symbol"]:
+            st.write(f"**Selected Stock:** {st.session_state['selected_stock_symbol']}")
+        
+        shares = st.number_input("Shares", min_value=0.01, value=1.0, step=0.1)
+    
+    with col2:
+        avg_price = st.number_input("Average Price (leave blank for current price)", min_value=0.0, value=0.0, step=0.01)
+        reinvest_dividends = st.checkbox("Reinvest Dividends", value=True)
+    
+    if st.button("Add Holding"):
+        selected_symbol = st.session_state.get("selected_stock_symbol")
+        if not selected_symbol:
+            st.error("Please search and select a stock")
+        elif shares <= 0:
+            st.error("Please enter a valid number of shares")
+        else:
+            try:
+                payload = {
+                    "portfolio_id": selected_portfolio['id'],
+                    "symbol": selected_symbol,
+                    "shares": shares,
+                    "reinvest_dividends": reinvest_dividends
+                }
+                # Only add avg_price if it's greater than 0
+                if avg_price and avg_price > 0:
+                    payload["avg_price"] = avg_price
+                
+                result = api_post("/holdings", json=payload)
+                st.success(f"Added {shares} shares of {selected_symbol} at ${result.get('quote_used', 'current')} per share")
+                
+                # Clear search state after successful add
+                st.session_state["stock_search_query"] = ""
+                st.session_state["stock_search_results"] = []
+                st.session_state["selected_stock_symbol"] = None
+                
+                st.cache_data.clear()  # Clear cache to refresh data
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to add holding: {e}")
+
+# ----------------- Actions -----------------
+st.subheader("🔄 Actions")
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    if st.button("🔄 Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
+
+with col2:
+    if st.button("📊 Go to Profile"):
+        st.switch_page("pages/03_Profile.py")
+
+with col3:
+    if st.button("📈 Go to Forecast"):
+        st.switch_page("pages/02_Forecast.py")

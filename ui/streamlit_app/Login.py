@@ -10,7 +10,7 @@ with tab1:
     st.write("Use this for local demos (no real auth).")
     if st.button("Initialize Dev User"):
         try:
-            res = api_post("/users/me/init")
+            res = api_post("/me/init")
             st.success(f"Initialized user: {res.get('id')}")
             st.session_state["is_authed"] = True
             st.switch_page("pages/00_Home.py")
