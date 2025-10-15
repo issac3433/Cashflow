@@ -10,12 +10,23 @@ def api_base() -> str:
         or "http://localhost:8000"
     ).rstrip("/")
 
+def _get_headers():
+    """Get headers with JWT token if available."""
+    headers = {"Content-Type": "application/json"}
+    
+    # Check for JWT token in session state
+    if "jwt_token" in st.session_state and st.session_state["jwt_token"]:
+        headers["Authorization"] = f"Bearer {st.session_state['jwt_token']}"
+    
+    return headers
+
 def api_get(path: str, **params):
     url = f"{api_base()}{path if path.startswith('/') else '/'+path}"
+    headers = _get_headers()
     max_retries = 2
     for attempt in range(max_retries + 1):
         try:
-            r = requests.get(url, params=params, timeout=30)
+            r = requests.get(url, params=params, headers=headers, timeout=30)
             r.raise_for_status()
             return r.json()
         except requests.exceptions.Timeout:
@@ -29,6 +40,14 @@ def api_get(path: str, **params):
 
 def api_post(path: str, json=None):
     url = f"{api_base()}{path if path.startswith('/') else '/'+path}"
-    r = requests.post(url, json=json, timeout=15)
+    headers = _get_headers()
+    r = requests.post(url, json=json, headers=headers, timeout=15)
+    r.raise_for_status()
+    return r.json()
+
+def api_delete(path: str):
+    url = f"{api_base()}{path if path.startswith('/') else '/'+path}"
+    headers = _get_headers()
+    r = requests.delete(url, headers=headers, timeout=15)
     r.raise_for_status()
     return r.json()

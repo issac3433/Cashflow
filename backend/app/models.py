@@ -29,6 +29,7 @@ class Portfolio(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: str = Field(foreign_key="user.id")
     name: str = Field(default="Default")
+    portfolio_type: str = Field(default="individual")  # "individual" or "retirement"
     created_at: datetime = Field(default_factory=datetime.utcnow)
     # user: Optional[User] = Relationship(back_populates="portfolios")      # ← remove
     # holdings: list["Holding"] = Relationship(back_populates="portfolio")  # ← remove

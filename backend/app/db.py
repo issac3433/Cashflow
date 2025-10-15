@@ -1,11 +1,9 @@
 # app/db.py
 from sqlmodel import SQLModel, Session, create_engine
-import os
+from app.core.config import settings
 
-# If you already load from core.config, you can import settings instead of os.getenv:
-# from app.core.config import settings
-# DATABASE_URL = settings.DATABASE_URL
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./cashflow.db")
+# Use settings from config which loads from .env file
+DATABASE_URL = settings.DATABASE_URL
 
 # echo=True is handy while debugging; switch to False later
 engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True)

@@ -1,5 +1,7 @@
 import streamlit as st
 from utils.api import api_get
+from utils.supabase_auth import get_user_email, logout
+import os
 
 st.set_page_config(page_title="Cashflow", page_icon="💸", layout="wide")
 
@@ -10,15 +12,22 @@ left, right = st.columns([4,1])
 with left:
     st.title("💸 Cashflow — Home")
     try:
-        who = api_get("/auth/debug")
-        st.caption(f"Signed in as: `{who.get('user_id')}`")
+        who = api_get("/debug")
+        user_id = who.get('user_id')
+        
+        # Try to get email from Supabase if available
+        email = get_user_email()
+        if email:
+            st.caption(f"Signed in as: `{email}`")
+        else:
+            st.caption(f"Signed in as: `{user_id}`")
+            
     except Exception:
         st.caption("Signed in")
 
 with right:
-    if st.button("Logout"):
-        st.session_state.clear()
-        st.switch_page("Login.py")
+    if st.button("🚪 Logout"):
+        logout()
 
 st.markdown("### Quick Links")
 c1, c2 = st.columns(2)

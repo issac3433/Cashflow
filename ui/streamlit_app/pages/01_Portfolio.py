@@ -1,5 +1,5 @@
 import streamlit as st
-from utils.api import api_get, api_post
+from utils.api import api_get, api_post, api_delete
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
@@ -26,18 +26,31 @@ portfolios = load_portfolios()
 if not portfolios:
     st.warning("No portfolios found. Create your first portfolio below!")
     with st.expander("Create Portfolio", expanded=True):
-        name = st.text_input("Portfolio Name", value="My Portfolio")
+        col1, col2 = st.columns(2)
+        with col1:
+            name = st.text_input("Portfolio Name", value="My Individual Portfolio")
+        with col2:
+            portfolio_type = st.selectbox(
+                "Portfolio Type",
+                ["individual", "retirement"],
+                format_func=lambda x: "Individual" if x == "individual" else "Retirement",
+                help="Individual: Regular investment account\nRetirement: 401k, IRA, etc."
+            )
+        
         if st.button("Create Portfolio"):
             try:
-                result = api_post("/portfolios", json={"name": name})
-                st.success(f"Created portfolio: {result['name']}")
+                result = api_post("/portfolios", json={
+                    "name": name,
+                    "portfolio_type": portfolio_type
+                })
+                st.success(f"Created {portfolio_type} portfolio: {result['name']}")
                 st.rerun()
             except Exception as e:
                 st.error(f"Failed to create portfolio: {e}")
     st.stop()
 
 # Portfolio selector
-portfolio_options = {f"{p['name']} (ID: {p['id']})": p for p in portfolios}
+portfolio_options = {f"{p['name']} ({p.get('portfolio_type', 'individual').title()})": p for p in portfolios}
 selected_name = st.selectbox(
     "Select Portfolio",
     options=list(portfolio_options.keys()),
@@ -46,8 +59,40 @@ selected_name = st.selectbox(
 
 selected_portfolio = portfolio_options[selected_name]
 
+# Add portfolio creation option if user has less than 2 portfolios
+if len(portfolios) < 2:
+    st.info(f"💡 You can create up to 2 portfolios: 1 Individual + 1 Retirement. Currently have {len(portfolios)}.")
+    with st.expander("Create Another Portfolio"):
+        col1, col2 = st.columns(2)
+        with col1:
+            name = st.text_input("Portfolio Name", value="My Retirement Portfolio", key="new_portfolio_name")
+        with col2:
+            # Determine which type to offer
+            existing_types = [p.get('portfolio_type', 'individual') for p in portfolios]
+            if 'individual' not in existing_types:
+                portfolio_type = 'individual'
+                st.info("Creating Individual portfolio")
+            elif 'retirement' not in existing_types:
+                portfolio_type = 'retirement'
+                st.info("Creating Retirement portfolio")
+            else:
+                st.warning("You already have both portfolio types!")
+                portfolio_type = None
+        
+        if portfolio_type and st.button("Create Portfolio", key="create_new_portfolio"):
+            try:
+                result = api_post("/portfolios", json={
+                    "name": name,
+                    "portfolio_type": portfolio_type
+                })
+                st.success(f"Created {portfolio_type} portfolio: {result['name']}")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to create portfolio: {e}")
+
 # ----------------- Portfolio Overview -----------------
-st.subheader(f"📊 {selected_portfolio['name']} Overview")
+portfolio_type_display = selected_portfolio.get('portfolio_type', 'individual').title()
+st.subheader(f"📊 {selected_portfolio['name']} ({portfolio_type_display}) Overview")
 
 @st.cache_data(ttl=30)
 def load_portfolio_details(portfolio_id):
@@ -89,27 +134,54 @@ if portfolio_data and portfolio_data['holdings']:
     holdings_df['gain_loss'] = (holdings_df['latest_price'] - holdings_df['avg_price']) * holdings_df['shares']
     holdings_df['gain_loss_pct'] = ((holdings_df['latest_price'] - holdings_df['avg_price']) / holdings_df['avg_price'] * 100).round(2)
     
-    # Format columns
+    # Store original values for calculations
+    original_avg_price = holdings_df['avg_price'].copy()
+    original_latest_price = holdings_df['latest_price'].copy()
+    original_market_value = holdings_df['market_value'].copy()
+    
+    # Format columns for display
     holdings_df['avg_price'] = holdings_df['avg_price'].apply(lambda x: f"${x:.2f}")
     holdings_df['latest_price'] = holdings_df['latest_price'].apply(lambda x: f"${x:.2f}")
     holdings_df['market_value'] = holdings_df['market_value'].apply(lambda x: f"${x:,.2f}")
     holdings_df['gain_loss'] = holdings_df['gain_loss'].apply(lambda x: f"${x:,.2f}")
     holdings_df['gain_loss_pct'] = holdings_df['gain_loss_pct'].apply(lambda x: f"{x:.1f}%")
     
-    # Display table
-    st.dataframe(
-        holdings_df[['symbol', 'shares', 'avg_price', 'latest_price', 'market_value', 'gain_loss', 'gain_loss_pct']],
-        use_container_width=True,
-        column_config={
-            "symbol": "Symbol",
-            "shares": "Shares",
-            "avg_price": "Avg Price",
-            "latest_price": "Current Price",
-            "market_value": "Value",
-            "gain_loss": "P&L",
-            "gain_loss_pct": "P&L %"
-        }
-    )
+    # Display table with delete buttons
+    st.write("**Holdings Table:**")
+    
+    # Create columns for each holding with delete button
+    for idx, row in holdings_df.iterrows():
+        col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([2, 1, 1, 1, 1, 1, 1, 0.5])
+        
+        with col1:
+            st.write(f"**{row['symbol']}**")
+        with col2:
+            st.write(f"{row['shares']}")
+        with col3:
+            st.write(row['avg_price'])
+        with col4:
+            st.write(row['latest_price'])
+        with col5:
+            st.write(row['market_value'])
+        with col6:
+            st.write(row['gain_loss'])
+        with col7:
+            st.write(row['gain_loss_pct'])
+        with col8:
+            # Delete button
+            if st.button("🗑️", key=f"delete_{row['id']}", help="Delete this holding"):
+                try:
+                    # Use the holding ID directly from the dataframe
+                    holding_id = row['id']
+                    api_delete(f"/holdings/{holding_id}")
+                    st.success(f"Deleted {row['symbol']} holding")
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to delete holding: {e}")
+    
+    # Add a separator
+    st.divider()
     
     # Portfolio allocation chart
     if len(holdings_df) > 1:

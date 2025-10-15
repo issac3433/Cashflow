@@ -26,10 +26,35 @@ def create_portfolio(
     user_id: str = Depends(get_current_user_id),
     session: Session = Depends(get_session)
 ):
-    """Create a new portfolio."""
+    """Create a new portfolio with type limits (max 1 Individual + 1 Retirement)."""
     name = payload.get("name", "Default")
+    portfolio_type = payload.get("portfolio_type", "individual")
     
-    portfolio = Portfolio(user_id=user_id, name=name, created_at=datetime.utcnow())
+    # Validate portfolio type
+    if portfolio_type not in ["individual", "retirement"]:
+        raise HTTPException(400, detail="Portfolio type must be 'individual' or 'retirement'")
+    
+    # Check existing portfolios of this type
+    existing_portfolios = session.exec(
+        select(Portfolio).where(
+            Portfolio.user_id == user_id,
+            Portfolio.portfolio_type == portfolio_type
+        )
+    ).all()
+    
+    if len(existing_portfolios) >= 1:
+        raise HTTPException(
+            400, 
+            detail=f"You can only have 1 {portfolio_type} portfolio. You already have: {existing_portfolios[0].name}"
+        )
+    
+    # Create new portfolio
+    portfolio = Portfolio(
+        user_id=user_id, 
+        name=name, 
+        portfolio_type=portfolio_type,
+        created_at=datetime.utcnow()
+    )
     session.add(portfolio)
     session.commit()
     session.refresh(portfolio)
@@ -84,6 +109,7 @@ def get_portfolio(
         "portfolio": {
             "id": portfolio.id,
             "name": portfolio.name,
+            "portfolio_type": portfolio.portfolio_type,
             "user_id": portfolio.user_id,
             "created_at": portfolio.created_at,
         },
