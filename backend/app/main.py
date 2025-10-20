@@ -2,7 +2,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.db import create_db_and_tables
-from app.routers import users, portfolios, holdings, dividends, forecasts, prices, symbols, auth, profile
+from app.routers import users, portfolios, holdings, dividends, forecasts, prices, symbols, auth, profile, risk
 
 app = FastAPI(title="Cashflow API", version="1.0.0")
 
@@ -26,7 +26,8 @@ app.include_router(dividends.router,  prefix="",  tags=["dividends"])
 app.include_router(forecasts.router,  prefix="/forecasts",  tags=["forecasts"])
 app.include_router(symbols.router,    prefix="/symbols",    tags=["symbols"])
 app.include_router(auth.router,       prefix="",            tags=["auth"])
-app.include_router(profile.router,    prefix="",            tags=["profile"])    
+app.include_router(profile.router,    prefix="",            tags=["profile"])
+app.include_router(risk.router,       prefix="/risk",       tags=["risk"])    
 
 @app.get("/health")
 def health():

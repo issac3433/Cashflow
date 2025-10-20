@@ -50,12 +50,18 @@ class SupabaseAuth:
             raise Exception("Supabase not configured")
         
         try:
+            print(f"🔍 Attempting sign in for: {email}")
             response = self.client.auth.sign_in_with_password({
                 "email": email,
                 "password": password
             })
             
+            print(f"🔍 Sign in response: user={response.user is not None}, session={response.session is not None}")
+            
             if response.user and response.session:
+                print(f"🔍 User ID: {response.user.id}")
+                print(f"🔍 Access token: {response.session.access_token[:50]}...")
+                
                 # Initialize user in our backend database
                 self._initialize_user_in_backend(response.session.access_token)
             
@@ -66,9 +72,19 @@ class SupabaseAuth:
                 "access_token": response.session.access_token if response.session else None
             }
         except Exception as e:
+            error_msg = str(e)
+            print(f"🔍 Sign in error: {error_msg}")
+            
+            # Handle email not confirmed error
+            if "email not confirmed" in error_msg.lower():
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "message": "Please check your email and click the verification link before signing in."
+                }
             return {
                 "success": False,
-                "error": str(e),
+                "error": error_msg,
                 "message": "Sign in failed"
             }
     
@@ -77,15 +93,21 @@ class SupabaseAuth:
         try:
             import requests
             headers = {"Authorization": f"Bearer {access_token}"}
+            print(f"🔍 Initializing user in backend with token: {access_token[:50]}...")
+            
             response = requests.post(
                 "http://localhost:8000/me/init-supabase",
                 headers=headers,
                 timeout=10
             )
+            
+            print(f"🔍 Backend init response: {response.status_code}")
+            
             if response.status_code == 200:
                 print("✅ User initialized in backend database")
             else:
                 print(f"⚠️ Failed to initialize user in backend: {response.status_code}")
+                print(f"Response: {response.text}")
         except Exception as e:
             print(f"⚠️ Error initializing user in backend: {e}")
     
@@ -120,7 +142,10 @@ class SupabaseAuth:
         
         try:
             session = self.client.auth.get_session()
-            return session.session.access_token if session.session else None
+            if session and hasattr(session, 'access_token'):
+                # Return the access token directly from session
+                return session.access_token
+            return None
         except Exception as e:
             print(f"Get token error: {e}")
             return None
@@ -138,20 +163,25 @@ def check_supabase_auth() -> bool:
     """Check if user is authenticated with Supabase."""
     init_supabase_session()
     
-    # Check if we already have a valid session
-    if st.session_state.is_authed and st.session_state.supabase_user:
-        return True
-    
     # Try to get current user from Supabase
     auth = SupabaseAuth()
     if auth.client:
         user = auth.get_current_user()
         if user:
-            st.session_state.supabase_user = user
-            st.session_state.supabase_token = auth.get_access_token()
-            st.session_state.is_authed = True
-            return True
+            # Get fresh access token
+            access_token = auth.get_access_token()
+            if access_token:
+                st.session_state.supabase_user = user
+                st.session_state.supabase_token = access_token
+                st.session_state.jwt_token = access_token  # This is the key fix!
+                st.session_state.is_authed = True
+                return True
     
+    # Clear session if not authenticated
+    st.session_state.supabase_user = None
+    st.session_state.supabase_token = None
+    st.session_state.jwt_token = None
+    st.session_state.is_authed = False
     return False
 
 def logout():
@@ -161,19 +191,22 @@ def logout():
     
     st.session_state.supabase_user = None
     st.session_state.supabase_token = None
+    st.session_state.jwt_token = None  # Clear JWT token too
     st.session_state.is_authed = False
     st.rerun()
 
 def get_user_id() -> Optional[str]:
     """Get current user ID."""
     if st.session_state.is_authed and st.session_state.supabase_user:
-        return st.session_state.supabase_user.get("id")
+        # Supabase User object has attributes, not dictionary keys
+        return getattr(st.session_state.supabase_user, 'id', None)
     return None
 
 def get_user_email() -> Optional[str]:
     """Get current user email."""
     if st.session_state.is_authed and st.session_state.supabase_user:
-        return st.session_state.supabase_user.get("email")
+        # Supabase User object has attributes, not dictionary keys
+        return getattr(st.session_state.supabase_user, 'email', None)
     return None
 
 def is_supabase_configured() -> bool:

@@ -41,6 +41,7 @@ class Holding(SQLModel, table=True):
     shares: float
     avg_price: float = 0.0
     reinvest_dividends: bool = True
+    purchase_date: Optional[datetime] = Field(default_factory=datetime.utcnow)
     # portfolio: Optional[Portfolio] = Relationship(back_populates="holdings")  # ← remove
 
 class UserProfile(SQLModel, table=True):

@@ -134,11 +134,12 @@ def process_dividend_payments(user_id: str = Depends(get_current_user_id), sessi
         session.add(profile)
     
     for holding in holdings:
-        # Get dividend events for this symbol
+        # Get dividend events for this symbol that occurred AFTER purchase date
         dividend_events = session.exec(
             select(DividendEvent)
             .where(DividendEvent.symbol == holding.symbol)
             .where(DividendEvent.ex_date <= date.today())  # Only past dividends
+            .where(DividendEvent.ex_date >= holding.purchase_date.date())  # Only after purchase
         ).all()
         
         for div_event in dividend_events:

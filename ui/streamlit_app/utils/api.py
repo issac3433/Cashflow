@@ -23,20 +23,16 @@ def _get_headers():
 def api_get(path: str, **params):
     url = f"{api_base()}{path if path.startswith('/') else '/'+path}"
     headers = _get_headers()
-    max_retries = 2
-    for attempt in range(max_retries + 1):
-        try:
-            r = requests.get(url, params=params, headers=headers, timeout=30)
-            r.raise_for_status()
-            return r.json()
-        except requests.exceptions.Timeout:
-            if attempt < max_retries:
-                continue  # Retry
-            raise Exception(f"Request timed out after {max_retries + 1} attempts. The API might be slow.")
-        except requests.exceptions.ConnectionError:
-            raise Exception(f"Could not connect to API at {url}")
-        except requests.exceptions.HTTPError as e:
-            raise Exception(f"API error: {e}")
+    try:
+        r = requests.get(url, params=params, headers=headers, timeout=15)
+        r.raise_for_status()
+        return r.json()
+    except requests.exceptions.Timeout:
+        raise Exception(f"Request timed out after 15 seconds. The API might be slow.")
+    except requests.exceptions.ConnectionError:
+        raise Exception(f"Could not connect to API at {url}")
+    except requests.exceptions.HTTPError as e:
+        raise Exception(f"API error: {e}")
 
 def api_post(path: str, json=None):
     url = f"{api_base()}{path if path.startswith('/') else '/'+path}"
@@ -48,6 +44,6 @@ def api_post(path: str, json=None):
 def api_delete(path: str):
     url = f"{api_base()}{path if path.startswith('/') else '/'+path}"
     headers = _get_headers()
-    r = requests.delete(url, headers=headers, timeout=15)
+    r = requests.delete(url, headers=headers, timeout=10)
     r.raise_for_status()
     return r.json()

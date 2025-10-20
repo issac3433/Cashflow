@@ -34,7 +34,15 @@ if supabase_configured:
             
             if submit:
                 if email and password:
-                    result = auth.sign_in(email, password)
+                    with st.spinner("Signing in..."):
+                        result = auth.sign_in(email, password)
+                    
+                    # Debug output
+                    st.write("**Debug Info:**")
+                    st.write(f"- Success: {result.get('success', False)}")
+                    st.write(f"- Message: {result.get('message', 'No message')}")
+                    st.write(f"- Error: {result.get('error', 'No error')}")
+                    
                     if result["success"]:
                         st.success("✅ Signed in successfully!")
                         
@@ -44,9 +52,22 @@ if supabase_configured:
                         st.session_state.is_authed = True
                         st.session_state.jwt_token = result["access_token"]  # For API calls
                         
-                        st.rerun()
+                        st.write("**Session State After Sign In:**")
+                        st.write(f"- is_authed: {st.session_state.get('is_authed', False)}")
+                        st.write(f"- jwt_token: {'Present' if st.session_state.get('jwt_token') else 'Missing'}")
+                        st.write(f"- supabase_user: {'Present' if st.session_state.get('supabase_user') else 'Missing'}")
+                        
+                        st.info("🔄 Redirecting to home page...")
+                        
+                        # Force redirect to home page
+                        st.switch_page("pages/00_Home.py")
                     else:
-                        st.error(f"❌ {result['message']}: {result.get('error', '')}")
+                        error_msg = result.get('error', '')
+                        if 'email not confirmed' in error_msg.lower():
+                            st.error("❌ Email not verified!")
+                            st.info("📧 Please check your email and click the verification link, then try signing in again.")
+                        else:
+                            st.error(f"❌ {result['message']}: {error_msg}")
                 else:
                     st.warning("Please enter both email and password.")
     
@@ -92,7 +113,9 @@ if supabase_configured:
             try:
                 user = auth.get_current_user()
                 if user:
-                    st.success(f"✅ Supabase connected! User: {user.get('email', 'Unknown')}")
+                    # Supabase User object has attributes, not dictionary keys
+                    email = getattr(user, 'email', 'Unknown')
+                    st.success(f"✅ Supabase connected! User: {email}")
                 else:
                     st.info("ℹ️ Supabase connected (no user signed in)")
             except Exception as e:

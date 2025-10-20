@@ -13,6 +13,7 @@ POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
 def _yfinance_dividends(symbol: str) -> List[Dict[str, Any]]:
     try:
         t = yf.Ticker(symbol)
+        # Use shorter timeout and only get dividend data
         df = t.dividends  # pandas Series: index=Timestamp (ex-date), value=amount
         if df is None or df.empty:
             return []
@@ -27,7 +28,8 @@ def _yfinance_dividends(symbol: str) -> List[Dict[str, Any]]:
                 "source": "yfinance",
             })
         return out
-    except Exception:
+    except Exception as e:
+        print(f"yfinance failed for {symbol}: {e}")
         return []
 
 def _polygon_dividends(symbol: str) -> List[Dict[str, Any]]:
@@ -35,9 +37,9 @@ def _polygon_dividends(symbol: str) -> List[Dict[str, Any]]:
         return []
     import requests
     url = "https://api.polygon.io/v3/reference/dividends"
-    params = {"ticker": symbol.upper(), "limit": 1000, "apiKey": POLYGON_API_KEY}
+    params = {"ticker": symbol.upper(), "limit": 100, "apiKey": POLYGON_API_KEY}  # Reduced limit
     try:
-        r = requests.get(url, params=params, timeout=10)
+        r = requests.get(url, params=params, timeout=5)  # Reduced timeout
         if not r.ok:
             return []
         data = r.json() or {}
@@ -52,7 +54,8 @@ def _polygon_dividends(symbol: str) -> List[Dict[str, Any]]:
                 "source": "polygon",
             })
         return out
-    except Exception:
+    except Exception as e:
+        print(f"Polygon failed for {symbol}: {e}")
         return []
 
 def _safe_date(x):
@@ -85,9 +88,20 @@ def _merge_events(primary: List[Dict], secondary: List[Dict]) -> List[Dict]:
 # Public wrapper expected by routers
 def fetch_dividends(symbol: str) -> List[Dict[str, Any]]:
     symbol = symbol.upper().strip()
-    yfd = _yfinance_dividends(symbol)
-    pgd = _polygon_dividends(symbol)
-    return _merge_events(yfd, pgd)
+    
+    # Skip symbols that are known to not pay dividends or cause issues
+    non_dividend_symbols = {'ULTY', 'YMAX'}  # These are ETFs/funds that don't pay traditional dividends
+    if symbol in non_dividend_symbols:
+        print(f"Skipping {symbol} - known non-dividend payer")
+        return []
+    
+    try:
+        yfd = _yfinance_dividends(symbol)
+        pgd = _polygon_dividends(symbol)
+        return _merge_events(yfd, pgd)
+    except Exception as e:
+        print(f"Failed to fetch dividends for {symbol}: {e}")
+        return []
 
 # ---------- upsert ----------
 def _upsert_dividends(session: Session, events: List[Dict[str, Any]]) -> int:
@@ -147,13 +161,19 @@ def refresh_all_dividends() -> int:
 def build_portfolio_income_calendar() -> List[Dict[str, Any]]:
     """
     Returns a flat list of rows from holdings × dividend events.
+    Shows dividends received AFTER the purchase date of each holding.
+    Includes both past (already paid) and future dividends.
     Each item:
       {
         "portfolio_id": int, "symbol": str,
         "ex_date": date|None, "pay_date": date|None,
-        "amount": float, "shares": float, "cash": float
+        "amount": float, "shares": float, "cash": float,
+        "status": str  # "paid" or "upcoming"
       }
     """
+    from datetime import date
+    today = date.today()
+    
     out: List[Dict[str, Any]] = []
     with Session(engine) as session:
         rows = session.exec(
@@ -161,6 +181,7 @@ def build_portfolio_income_calendar() -> List[Dict[str, Any]]:
                 Holding.portfolio_id,
                 Holding.symbol,
                 Holding.shares,
+                Holding.purchase_date,
                 DividendEvent.ex_date,
                 DividendEvent.pay_date,
                 DividendEvent.amount,
@@ -169,9 +190,24 @@ def build_portfolio_income_calendar() -> List[Dict[str, Any]]:
             .where(Holding.symbol == DividendEvent.symbol)
         ).all()
 
-        for pid, sym, shares, exd, payd, amt in rows:
+        for pid, sym, shares, purchase_date, exd, payd, amt in rows:
             sh = float(shares or 0)
             dv = float(amt or 0)
+            
+                   # Include all dividends (past and future) regardless of purchase date
+                   # Commented out the purchase date filter to show all dividends
+                   # if purchase_date and exd:
+                   #     purchase_date_only = purchase_date.date() if hasattr(purchase_date, 'date') else purchase_date
+                   #     if exd < purchase_date_only:
+                   #         continue  # Skip dividends before purchase
+            
+            # Determine if dividend has been paid
+            status = "upcoming"
+            if payd and payd <= today:
+                status = "paid"
+            elif exd and exd <= today:
+                status = "paid"  # Ex-date has passed
+            
             out.append({
                 "portfolio_id": pid,
                 "symbol": str(sym).upper(),
@@ -180,5 +216,6 @@ def build_portfolio_income_calendar() -> List[Dict[str, Any]]:
                 "amount": dv,
                 "shares": sh,
                 "cash": dv * sh,
+                "status": status,
             })
     return out

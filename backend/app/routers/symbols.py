@@ -1,6 +1,6 @@
 # backend/app/routers/symbols.py
 from fastapi import APIRouter, Query
-from app.services.symbols import search_symbols_polygon  # already tries Polygon then Alpha Vantage
+from app.services.symbols import search_symbols_polygon, _get_api_call_status  # already tries Polygon then Alpha Vantage
 from app.services.prices import batch_fetch_latest_prices
 
 router = APIRouter(tags=["symbols"])
@@ -15,7 +15,7 @@ def suggest(q: str = Query(..., min_length=1), limit: int = 10):
         # 1) search by name/ticker
         results = search_symbols_polygon(q, limit)
         if not results:
-            return {"query": q, "results": []}
+            return {"query": q, "results": [], "api_status": _get_api_call_status()}
             
         syms = [r.get("symbol") for r in results if r.get("symbol")]
         # 2) batch fetch latest prices
@@ -31,7 +31,12 @@ def suggest(q: str = Query(..., min_length=1), limit: int = 10):
                     "primary_exchange": r.get("primary_exchange", ""),
                     "price": prices.get(sym),
                 })
-        return {"query": q, "results": out}
+        return {"query": q, "results": out, "api_status": _get_api_call_status()}
     except Exception as e:
         # Return empty results on any error
-        return {"query": q, "results": [], "error": str(e)}
+        return {"query": q, "results": [], "error": str(e), "api_status": _get_api_call_status()}
+
+@router.get("/api-status")
+def get_api_status():
+    """Get current API call status and rate limit info."""
+    return _get_api_call_status()

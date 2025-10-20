@@ -5,7 +5,7 @@ from typing import List, Dict, Any
 
 from app.db import get_session
 from app.models import DividendEvent, Holding
-from app.services.dividends import (   # <-- absolute
+from app.services.dividends import (
     fetch_dividends,
     upsert_dividends,
     build_portfolio_income_calendar,
@@ -13,7 +13,7 @@ from app.services.dividends import (   # <-- absolute
 
 # Optional Celery trigger
 try:
-    from app.workers.tasks import refresh_dividends_for_all  # <-- absolute
+    from app.workers.tasks import refresh_dividends_for_all
     HAVE_CELERY = True
 except Exception:
     HAVE_CELERY = False
@@ -61,19 +61,6 @@ def sync_portfolio(portfolio_id: int, session: Session = Depends(get_session)):
         per_symbol[s] = n
     return {"portfolio_id": portfolio_id, "symbols": syms, "inserted": totals, "per_symbol": per_symbol}
 
-@router.post("/sync/all")
-def sync_all_symbols(session: Session = Depends(get_session)):
-    rows = session.exec(
-       select(Holding.symbol).where(Holding.shares > 0)
-    ).all()
-    syms = _to_symbol_list(rows)
-    totals = 0
-    per_symbol: Dict[str, int] = {}
-    for s in syms:
-        n = upsert_dividends(session, fetch_dividends(s) or [])
-        totals += n
-        per_symbol[s] = n
-    return {"symbols": syms, "inserted": totals, "per_symbol": per_symbol}
 
 @router.get("/calendar")
 def calendar():

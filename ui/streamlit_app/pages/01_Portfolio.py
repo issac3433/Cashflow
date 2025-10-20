@@ -6,10 +6,25 @@ from datetime import datetime
 
 st.set_page_config(page_title="Portfolio", page_icon="📁", layout="wide")
 
-if not st.session_state.get("is_authed"):
-    st.switch_page("Login.py")
+# Force authentication check
+if not st.session_state.get("is_authed") or not st.session_state.get("jwt_token"):
+    st.error("❌ You must be authenticated to access this page.")
+    st.write("Please sign in with your Supabase credentials.")
+    if st.button("Go to Login"):
+        st.switch_page("Login.py")
+    st.stop()
 
 st.title("📁 Portfolio Management")
+
+# Debug authentication status
+with st.expander("🔍 Debug Authentication Status", expanded=False):
+    st.write(f"**is_authed**: {st.session_state.get('is_authed', False)}")
+    st.write(f"**jwt_token**: {'Present' if st.session_state.get('jwt_token') else 'Missing'}")
+    st.write(f"**supabase_user**: {st.session_state.get('supabase_user', 'None')}")
+    if st.button("🔄 Clear Session & Logout"):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
 
 # ----------------- Portfolio Selector -----------------
 @st.cache_data(ttl=60)
@@ -81,18 +96,41 @@ if len(portfolios) < 2:
         
         if portfolio_type and st.button("Create Portfolio", key="create_new_portfolio"):
             try:
-                result = api_post("/portfolios", json={
-                    "name": name,
+                # Validate input
+                if not name or not name.strip():
+                    st.error("Portfolio name cannot be empty")
+                    st.stop()
+                
+                # Create portfolio payload
+                payload = {
+                    "name": name.strip(),
                     "portfolio_type": portfolio_type
-                })
+                }
+                
+                st.write(f"Creating portfolio with payload: {payload}")
+                
+                # Debug authentication
+                st.write(f"**Auth Debug:**")
+                st.write(f"- JWT Token present: {'Yes' if st.session_state.get('jwt_token') else 'No'}")
+                if st.session_state.get('jwt_token'):
+                    token_preview = st.session_state['jwt_token'][:50] + "..."
+                    st.write(f"- Token preview: {token_preview}")
+                
+                result = api_post("/portfolios", json=payload)
                 st.success(f"Created {portfolio_type} portfolio: {result['name']}")
+                
+                # Clear cache to refresh portfolio list
+                load_portfolios.clear()
                 st.rerun()
             except Exception as e:
                 st.error(f"Failed to create portfolio: {e}")
+                st.write("**Debug Info:**")
+                st.write(f"- Name: '{name}'")
+                st.write(f"- Type: '{portfolio_type}'")
+                st.write(f"- Payload: {payload if 'payload' in locals() else 'Not created'}")
 
 # ----------------- Portfolio Overview -----------------
 portfolio_type_display = selected_portfolio.get('portfolio_type', 'individual').title()
-st.subheader(f"📊 {selected_portfolio['name']} ({portfolio_type_display}) Overview")
 
 @st.cache_data(ttl=30)
 def load_portfolio_details(portfolio_id):
@@ -110,6 +148,46 @@ def load_portfolio_details(portfolio_id):
         }
 
 portfolio_data = load_portfolio_details(selected_portfolio['id'])
+
+# Portfolio title with delete button
+col_title, col_delete = st.columns([4, 1])
+with col_title:
+    st.subheader(f"📊 {selected_portfolio['name']} ({portfolio_type_display}) Overview")
+with col_delete:
+    if st.button("🗑️ Delete", key="delete_portfolio", help="Delete this portfolio"):
+        st.session_state["show_delete_confirm"] = True
+
+# Delete confirmation dialog
+if st.session_state.get("show_delete_confirm", False):
+    st.warning("⚠️ **Are you sure you want to delete this portfolio?**")
+    st.write(f"This will permanently delete **{selected_portfolio['name']}** and all its holdings.")
+    
+    col_confirm, col_cancel = st.columns(2)
+    with col_confirm:
+        if st.button("✅ Yes, Delete Portfolio", type="primary", key="confirm_delete"):
+            try:
+                # Delete all holdings first
+                if portfolio_data and portfolio_data['holdings']:
+                    for holding in portfolio_data['holdings']:
+                        api_delete(f"/holdings/{holding['id']}")
+                
+                # Delete the portfolio
+                api_delete(f"/portfolios/{selected_portfolio['id']}")
+                st.success(f"✅ Portfolio '{selected_portfolio['name']}' deleted successfully!")
+                st.session_state["show_delete_confirm"] = False
+                
+                # Clear the cached portfolio list to refresh the dropdown
+                load_portfolios.clear()
+                load_portfolio_details.clear()
+                
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to delete portfolio: {e}")
+    
+    with col_cancel:
+        if st.button("❌ Cancel", key="cancel_delete"):
+            st.session_state["show_delete_confirm"] = False
+            st.rerun()
 
 if portfolio_data:
     col1, col2, col3, col4 = st.columns(4)
@@ -257,6 +335,22 @@ with st.expander("Add New Holding", expanded=False):
                     with st.spinner("Searching..."):
                         search_results = api_get(f"/symbols/suggest?q={search_query}&limit=10")
                         st.session_state["stock_search_results"] = search_results.get("results", [])
+                        
+                        # Show API call status
+                        api_status = search_results.get("api_status", {})
+                        if api_status:
+                            calls_used = api_status.get("calls_used", 0)
+                            calls_remaining = api_status.get("calls_remaining", 0)
+                            max_calls = api_status.get("max_calls", 5)
+                            
+                            if calls_remaining <= 1:
+                                st.warning(f"⚠️ API calls almost exhausted! {calls_used}/{max_calls} used. {calls_remaining} remaining.")
+                            elif calls_remaining <= 2:
+                                st.info(f"ℹ️ API calls: {calls_used}/{max_calls} used. {calls_remaining} remaining.")
+                            
+                            if api_status.get("is_rate_limited"):
+                                time_until_reset = api_status.get("time_until_reset", 0)
+                                st.error(f"🚫 Rate limit reached! Wait {time_until_reset:.0f} seconds before searching again.")
                 except Exception as e:
                     st.error(f"Search error: {e}")
                     st.session_state["stock_search_results"] = []
@@ -340,7 +434,7 @@ with col1:
 
 with col2:
     if st.button("📊 Go to Profile"):
-        st.switch_page("pages/03_Profile.py")
+        st.switch_page("pages/04_Profile.py")
 
 with col3:
     if st.button("📈 Go to Forecast"):
