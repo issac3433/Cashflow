@@ -1,10 +1,13 @@
 import streamlit as st
 from utils.api import api_get, api_post
+from utils.mobile_css import inject_mobile_css
+from utils.supabase_auth import get_user_email
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
 
 st.set_page_config(page_title="Profile", page_icon="👤", layout="wide")
+inject_mobile_css()
 if not st.session_state.get("is_authed"):
     st.switch_page("Login.py")
 
@@ -35,30 +38,23 @@ except Exception as e:
     st.stop()
 
 # Display profile summary
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3 = st.columns(3)
 
 with col1:
-    st.metric(
-        "💰 Cash Balance", 
-        f"${profile_data['cash_balance']:,.2f}",
-        delta=None
-    )
-
-with col2:
     st.metric(
         "📈 Portfolio Value", 
         f"${profile_data['total_portfolio_value']:,.2f}",
         delta=None
     )
 
-with col3:
+with col2:
     st.metric(
         "💵 Total Dividends", 
         f"${profile_data['total_dividends_received']:,.2f}",
         delta=None
     )
 
-with col4:
+with col3:
     st.metric(
         "🏦 Net Worth", 
         f"${profile_data['total_net_worth']:,.2f}",
@@ -68,31 +64,80 @@ with col4:
 st.divider()
 
 # Cash Management Section
-st.subheader("💸 Cash Management")
+st.subheader("💸 Cash Management by Portfolio")
 
-col_a, col_b = st.columns(2)
+# Get account information
+email = None
+user_id = 'Unknown'
+try:
+    email = get_user_email()
+    debug_info = api_get("/debug")
+    user_id = debug_info.get('user_id', 'Unknown')
+except Exception:
+    pass
 
-with col_a:
-    st.write("**Add Cash**")
-    add_amount = st.number_input("Amount to add", min_value=0.01, value=100.0, step=0.01, key="add_cash")
-    if st.button("Add Cash", key="add_cash_btn"):
-        try:
-            result = api_post("/profile/cash/add", json={"amount": add_amount})
-            st.success(result["message"])
-            st.rerun()
-        except Exception as e:
-            st.error(f"Failed to add cash: {e}")
+# Display account information
+if email:
+    st.info(f"🏦 **Account:** `{email}` | Each portfolio has its own cash balance")
+else:
+    st.info(f"🏦 **Account:** `{user_id}` | Each portfolio has its own cash balance")
 
-with col_b:
-    st.write("**Withdraw Cash**")
-    withdraw_amount = st.number_input("Amount to withdraw", min_value=0.01, value=50.0, step=0.01, key="withdraw_cash")
-    if st.button("Withdraw Cash", key="withdraw_cash_btn"):
-        try:
-            result = api_post("/profile/cash/withdraw", json={"amount": withdraw_amount})
-            st.success(result["message"])
-            st.rerun()
-        except Exception as e:
-            st.error(f"Failed to withdraw cash: {e}")
+st.markdown("---")
+
+# Show cash balance and management for each portfolio
+if profile_data.get('portfolios'):
+    for portfolio in profile_data['portfolios']:
+        portfolio_id = portfolio['id']
+        portfolio_name = portfolio['name']
+        portfolio_cash = portfolio.get('cash_balance', 0.0)
+        
+        # Portfolio header with cash balance
+        with st.expander(f"💰 **{portfolio_name}** - Cash Balance: ${portfolio_cash:,.2f}", expanded=True):
+            col_add, col_withdraw = st.columns(2)
+            
+            with col_add:
+                st.write(f"**➕ Add Cash to {portfolio_name}**")
+                add_amount = st.number_input(
+                    "Amount to add", 
+                    min_value=0.01, 
+                    value=100.0, 
+                    step=0.01, 
+                    key=f"add_cash_{portfolio_id}"
+                )
+                if st.button("Add Cash", key=f"add_cash_btn_{portfolio_id}", type="primary"):
+                    try:
+                        result = api_post("/profile/cash/add", json={
+                            "amount": add_amount,
+                            "portfolio_id": portfolio_id
+                        })
+                        st.success(result["message"])
+                        st.info(f"💰 New balance: ${result.get('new_balance', portfolio_cash):,.2f}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to add cash: {e}")
+            
+            with col_withdraw:
+                st.write(f"**➖ Withdraw Cash from {portfolio_name}**")
+                withdraw_amount = st.number_input(
+                    "Amount to withdraw", 
+                    min_value=0.01, 
+                    value=50.0, 
+                    step=0.01, 
+                    key=f"withdraw_cash_{portfolio_id}"
+                )
+                if st.button("Withdraw Cash", key=f"withdraw_cash_btn_{portfolio_id}", type="primary"):
+                    try:
+                        result = api_post("/profile/cash/withdraw", json={
+                            "amount": withdraw_amount,
+                            "portfolio_id": portfolio_id
+                        })
+                        st.success(result["message"])
+                        st.info(f"💰 New balance: ${result.get('new_balance', portfolio_cash):,.2f}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to withdraw cash: {e}")
+else:
+    st.warning("⚠️ No portfolios found. Please create a portfolio first.")
 
 st.divider()
 
@@ -109,7 +154,7 @@ with col_c:
             with st.spinner("Processing dividend payments..."):
                 result = api_post("/dividends/process")
             st.success(f"✅ {result['message']}")
-            st.info(f"💰 Added ${result['total_added']:,.2f} to your cash balance")
+            st.info(f"💰 Added ${result['total_added']:,.2f} to portfolio cash balances")
             st.rerun()
         except Exception as e:
             st.error(f"Failed to process dividends: {e}")

@@ -1,9 +1,11 @@
 import streamlit as st
 from utils.api import api_get, api_post
 from utils.supabase_auth import SupabaseAuth, check_supabase_auth, logout, get_user_email, is_supabase_configured
+from utils.mobile_css import inject_mobile_css
 import os
 
 st.set_page_config(page_title="Cashflow Login", page_icon="🔐", layout="centered")
+inject_mobile_css()
 
 # Check if user is already authenticated
 if check_supabase_auth():

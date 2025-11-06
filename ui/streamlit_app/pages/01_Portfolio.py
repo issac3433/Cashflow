@@ -1,10 +1,12 @@
 import streamlit as st
 from utils.api import api_get, api_post, api_delete
+from utils.mobile_css import inject_mobile_css
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
 
 st.set_page_config(page_title="Portfolio", page_icon="📁", layout="wide")
+inject_mobile_css()
 
 # Force authentication check
 if not st.session_state.get("is_authed") or not st.session_state.get("jwt_token"):
@@ -27,7 +29,7 @@ with st.expander("🔍 Debug Authentication Status", expanded=False):
         st.rerun()
 
 # ----------------- Portfolio Selector -----------------
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=120)  # Cache for 2 minutes
 def load_portfolios():
     """Load user portfolios with caching."""
     try:
@@ -35,6 +37,14 @@ def load_portfolios():
     except Exception as e:
         st.error(f"Failed to load portfolios: {e}")
         return []
+
+@st.cache_data(ttl=60)  # Cache for 1 minute
+def load_user_profile():
+    """Load user profile with caching."""
+    try:
+        return api_get("/profile")
+    except Exception:
+        return {"cash_balance": 0.0}
 
 portfolios = load_portfolios()
 
@@ -121,6 +131,7 @@ if len(portfolios) < 2:
                 
                 # Clear cache to refresh portfolio list
                 load_portfolios.clear()
+                load_portfolio_details.clear()
                 st.rerun()
             except Exception as e:
                 st.error(f"Failed to create portfolio: {e}")
@@ -132,13 +143,29 @@ if len(portfolios) < 2:
 # ----------------- Portfolio Overview -----------------
 portfolio_type_display = selected_portfolio.get('portfolio_type', 'individual').title()
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=60)  # Cache for 1 minute (increased from 30s)
 def load_portfolio_details(portfolio_id):
     """Load detailed portfolio information with error handling."""
     try:
-        return api_get(f"/portfolios/{portfolio_id}")
+        with st.spinner("Loading portfolio..."):
+            return api_get(f"/portfolios/{portfolio_id}")
     except Exception as e:
-        st.error(f"Failed to load portfolio details: {e}")
+        error_msg = str(e)
+        if "timed out" in error_msg.lower():
+            st.warning("⚠️ Portfolio loading timed out. Showing cached data or using average prices.")
+            # Try to get basic portfolio info without prices
+            try:
+                # Return basic structure - prices will use avg_price
+                return {
+                    "portfolio": {"id": portfolio_id, "name": "Loading...", "created_at": "Unknown"},
+                    "holdings": [],
+                    "total_value": 0.0,
+                    "holdings_count": 0,
+                    "error": "Price fetch timeout"
+                }
+            except:
+                pass
+        st.error(f"Failed to load portfolio details: {error_msg}")
         # Return a fallback structure
         return {
             "portfolio": {"id": portfolio_id, "name": "Unknown", "created_at": "Unknown"},
@@ -179,6 +206,7 @@ if st.session_state.get("show_delete_confirm", False):
                 # Clear the cached portfolio list to refresh the dropdown
                 load_portfolios.clear()
                 load_portfolio_details.clear()
+                load_user_profile.clear()
                 
                 st.rerun()
             except Exception as e:
@@ -189,17 +217,23 @@ if st.session_state.get("show_delete_confirm", False):
             st.session_state["show_delete_confirm"] = False
             st.rerun()
 
+# Get portfolio cash balance (from portfolio data)
 if portfolio_data:
-    col1, col2, col3, col4 = st.columns(4)
+    cash_balance = portfolio_data['portfolio'].get('cash_balance', 0.0)
+    
+    # Responsive columns - stack on mobile
+    col1, col2, col3, col4, col5 = st.columns([1.2, 1, 0.8, 1, 0.8])
     
     with col1:
-        st.metric("Total Value", f"${portfolio_data['total_value']:,.2f}")
+        st.metric("💰 Cash Balance", f"${cash_balance:,.2f}")
     with col2:
-        st.metric("Holdings", portfolio_data['holdings_count'])
+        st.metric("Total Value", f"${portfolio_data['total_value']:,.2f}")
     with col3:
+        st.metric("Holdings", portfolio_data['holdings_count'])
+    with col4:
         avg_value = portfolio_data['total_value'] / max(portfolio_data['holdings_count'], 1)
         st.metric("Avg Position", f"${avg_value:,.2f}")
-    with col4:
+    with col5:
         st.metric("Created", portfolio_data['portfolio']['created_at'][:10])
 
 # ----------------- Holdings Table -----------------
@@ -215,7 +249,7 @@ if portfolio_data and portfolio_data['holdings']:
     # Store original values for calculations
     original_avg_price = holdings_df['avg_price'].copy()
     original_latest_price = holdings_df['latest_price'].copy()
-    original_market_value = holdings_df['market_value'].copy()
+    original_shares = holdings_df['shares'].copy()
     
     # Format columns for display
     holdings_df['avg_price'] = holdings_df['avg_price'].apply(lambda x: f"${x:.2f}")
@@ -224,17 +258,21 @@ if portfolio_data and portfolio_data['holdings']:
     holdings_df['gain_loss'] = holdings_df['gain_loss'].apply(lambda x: f"${x:,.2f}")
     holdings_df['gain_loss_pct'] = holdings_df['gain_loss_pct'].apply(lambda x: f"{x:.1f}%")
     
-    # Display table with delete buttons
+    # Display table with sell buttons
     st.write("**Holdings Table:**")
     
-    # Create columns for each holding with delete button
+    # Create columns for each holding with sell button
     for idx, row in holdings_df.iterrows():
-        col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([2, 1, 1, 1, 1, 1, 1, 0.5])
+        holding_id = row['id']
+        symbol = row['symbol']
+        shares_owned = float(original_shares.loc[idx])
+        
+        col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([2, 1, 1, 1, 1, 1, 1, 1])
         
         with col1:
-            st.write(f"**{row['symbol']}**")
+            st.write(f"**{symbol}**")
         with col2:
-            st.write(f"{row['shares']}")
+            st.write(f"{shares_owned:.2f}")
         with col3:
             st.write(row['avg_price'])
         with col4:
@@ -246,17 +284,51 @@ if portfolio_data and portfolio_data['holdings']:
         with col7:
             st.write(row['gain_loss_pct'])
         with col8:
-            # Delete button
-            if st.button("🗑️", key=f"delete_{row['id']}", help="Delete this holding"):
-                try:
-                    # Use the holding ID directly from the dataframe
-                    holding_id = row['id']
-                    api_delete(f"/holdings/{holding_id}")
-                    st.success(f"Deleted {row['symbol']} holding")
-                    st.cache_data.clear()
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Failed to delete holding: {e}")
+            # Sell button - opens a form
+            if st.button("💰 Sell", key=f"sell_btn_{holding_id}", help="Sell this holding"):
+                st.session_state[f"sell_holding_{holding_id}"] = True
+        
+        # Show sell form if button was clicked
+        if st.session_state.get(f"sell_holding_{holding_id}", False):
+            with st.expander(f"💸 Sell {symbol}", expanded=True):
+                st.write(f"**Current holdings:** {shares_owned:.2f} shares")
+                current_price = float(original_latest_price.loc[idx])
+                st.write(f"**Current price:** ${current_price:.2f}")
+                
+                col_sell1, col_sell2 = st.columns(2)
+                
+                with col_sell1:
+                    shares_to_sell = st.number_input(
+                        "Shares to sell",
+                        min_value=0.01,
+                        max_value=float(shares_owned),
+                        value=float(shares_owned),
+                        step=0.01,
+                        key=f"sell_shares_{holding_id}"
+                    )
+                    estimated_proceeds = shares_to_sell * current_price
+                    st.info(f"**Estimated proceeds:** ${estimated_proceeds:,.2f}")
+                
+                with col_sell2:
+                    st.write("")  # Spacer
+                    if st.button("✅ Confirm Sell", key=f"confirm_sell_{holding_id}", type="primary"):
+                        try:
+                            result = api_post(f"/holdings/{holding_id}/sell", json={"shares": shares_to_sell})
+                            st.success(f"✅ {result['message']}")
+                            st.info(f"💰 Added ${result['proceeds']:,.2f} to cash balance")
+                            st.session_state[f"sell_holding_{holding_id}"] = False
+                            # Clear only relevant caches
+                            load_portfolio_details.clear()
+                            load_user_profile.clear()
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Failed to sell: {e}")
+                    
+                    if st.button("❌ Cancel", key=f"cancel_sell_{holding_id}"):
+                        st.session_state[f"sell_holding_{holding_id}"] = False
+                        st.rerun()
+        
+        st.divider()
     
     # Add a separator
     st.divider()
@@ -391,8 +463,34 @@ with st.expander("Add New Holding", expanded=False):
         avg_price = st.number_input("Average Price (leave blank for current price)", min_value=0.0, value=0.0, step=0.01)
         reinvest_dividends = st.checkbox("Reinvest Dividends", value=True)
     
-    if st.button("Add Holding"):
-        selected_symbol = st.session_state.get("selected_stock_symbol")
+    # Calculate estimated cost and validate cash
+    selected_symbol = st.session_state.get("selected_stock_symbol")
+    estimated_cost = 0.0
+    has_sufficient_cash = True
+    
+    if selected_symbol and shares > 0:
+        # Get price from search results or use avg_price
+        estimated_price = avg_price if avg_price > 0 else None
+        if not estimated_price and st.session_state.get("stock_search_results"):
+            for result in st.session_state["stock_search_results"]:
+                if result['symbol'] == selected_symbol:
+                    estimated_price = result.get('price', 0)
+                    break
+        
+        if estimated_price:
+            estimated_cost = shares * estimated_price
+            st.info(f"💰 **Estimated cost:** ${estimated_cost:,.2f}")
+            if cash_balance < estimated_cost:
+                has_sufficient_cash = False
+                st.warning(f"⚠️ **Insufficient cash!** You need ${estimated_cost - cash_balance:,.2f} more.")
+            else:
+                remaining = cash_balance - estimated_cost
+                st.success(f"✅ **Cash after purchase:** ${remaining:,.2f}")
+    
+    # Disable button if insufficient cash
+    button_disabled = not has_sufficient_cash or not selected_symbol or shares <= 0
+    
+    if st.button("Add Holding", type="primary", disabled=button_disabled):
         if not selected_symbol:
             st.error("Please search and select a stock")
         elif shares <= 0:
@@ -410,17 +508,33 @@ with st.expander("Add New Holding", expanded=False):
                     payload["avg_price"] = avg_price
                 
                 result = api_post("/holdings", json=payload)
-                st.success(f"Added {shares} shares of {selected_symbol} at ${result.get('quote_used', 'current')} per share")
+                action = result.get('action', 'created')
+                if action == 'merged':
+                    st.success(f"✅ Merged and updated holding: Added {shares} shares of {selected_symbol} at ${result.get('quote_used', 'current'):.2f} per share")
+                    st.info(f"📊 All {selected_symbol} holdings were combined. New average price: ${result['holding']['avg_price']:.2f} | Total shares: {result['holding']['shares']:.2f}")
+                elif action == 'updated':
+                    st.success(f"✅ Updated holding: Added {shares} shares of {selected_symbol} at ${result.get('quote_used', 'current'):.2f} per share")
+                    st.info(f"📊 New average price: ${result['holding']['avg_price']:.2f} | Total shares: {result['holding']['shares']:.2f}")
+                else:
+                    st.success(f"✅ Added {shares} shares of {selected_symbol} at ${result.get('quote_used', 'current'):.2f} per share")
+                st.info(f"💰 Deducted ${result.get('cash_deducted', 0):,.2f} from cash. New balance: ${result.get('new_cash_balance', 0):,.2f}")
                 
                 # Clear search state after successful add
                 st.session_state["stock_search_query"] = ""
                 st.session_state["stock_search_results"] = []
                 st.session_state["selected_stock_symbol"] = None
                 
-                st.cache_data.clear()  # Clear cache to refresh data
+                # Clear only relevant caches instead of all
+                load_portfolio_details.clear()
+                load_user_profile.clear()
                 st.rerun()
             except Exception as e:
-                st.error(f"Failed to add holding: {e}")
+                error_msg = str(e)
+                if "Insufficient cash" in error_msg:
+                    st.error(f"❌ {error_msg}")
+                    st.info("💡 Go to Profile page to add more cash to your account.")
+                else:
+                    st.error(f"Failed to add holding: {e}")
 
 # ----------------- Actions -----------------
 st.subheader("🔄 Actions")
@@ -429,7 +543,10 @@ col1, col2, col3 = st.columns(3)
 
 with col1:
     if st.button("🔄 Refresh Data"):
-        st.cache_data.clear()
+        # Clear all caches
+        load_portfolios.clear()
+        load_portfolio_details.clear()
+        load_user_profile.clear()
         st.rerun()
 
 with col2:

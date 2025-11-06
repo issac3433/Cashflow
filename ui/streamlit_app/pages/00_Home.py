@@ -1,9 +1,11 @@
 import streamlit as st
 from utils.api import api_get
 from utils.supabase_auth import get_user_email, logout
+from utils.mobile_css import inject_mobile_css
 import os
 
 st.set_page_config(page_title="Cashflow", page_icon="💸", layout="wide")
+inject_mobile_css()
 
 if not st.session_state.get("is_authed"):
     st.switch_page("Login.py")

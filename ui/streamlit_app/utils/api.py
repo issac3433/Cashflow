@@ -23,12 +23,21 @@ def _get_headers():
 def api_get(path: str, **params):
     url = f"{api_base()}{path if path.startswith('/') else '/'+path}"
     headers = _get_headers()
+    
+    # Longer timeout for endpoints that fetch prices (can be slow)
+    if "/portfolios/" in path and path.count("/") == 2:
+        timeout = 30  # Portfolio details with price fetching
+    elif path == "/profile":
+        timeout = 30  # Profile endpoint also fetches prices for all portfolios
+    else:
+        timeout = 10
+    
     try:
-        r = requests.get(url, params=params, headers=headers, timeout=15)
+        r = requests.get(url, params=params, headers=headers, timeout=timeout)
         r.raise_for_status()
         return r.json()
     except requests.exceptions.Timeout:
-        raise Exception(f"Request timed out after 15 seconds. The API might be slow.")
+        raise Exception(f"Request timed out after {timeout} seconds. The API might be slow.")
     except requests.exceptions.ConnectionError:
         raise Exception(f"Could not connect to API at {url}")
     except requests.exceptions.HTTPError as e:
@@ -37,7 +46,7 @@ def api_get(path: str, **params):
 def api_post(path: str, json=None):
     url = f"{api_base()}{path if path.startswith('/') else '/'+path}"
     headers = _get_headers()
-    r = requests.post(url, json=json, headers=headers, timeout=15)
+    r = requests.post(url, json=json, headers=headers, timeout=10)  # Reduced from 15s to 10s
     r.raise_for_status()
     return r.json()
 

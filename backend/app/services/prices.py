@@ -11,7 +11,7 @@ ALPHA_KEY = os.getenv("ALPHAVANTAGE_API_KEY")
 
 # tiny in-process cache to soften free-plan rate limits
 _cache: Dict[str, tuple[float, Optional[float]]] = {}
-TTL_SECONDS = 60  # 1 minute cache for quotes
+TTL_SECONDS = 120  # 2 minute cache for quotes (increased for better performance)
 
 def _get_cached(sym: str) -> Optional[float]:
     now = time.time()
@@ -59,11 +59,17 @@ def _yf_close(symbol: str) -> Optional[float]:
     s = symbol.upper().strip().replace("$", "")
     try:
         t = yf.Ticker(s)
-        for period in ["1d","5d"]:
-            hist = t.history(period=period, interval="1d")
-            if hist is not None and not hist.empty:
-                v = float(hist["Close"].dropna().iloc[-1])
-                return v if v > 0 else None
+        # Try 1d first (faster), only fallback to 5d if needed
+        hist = t.history(period="1d", interval="1d", timeout=3)
+        if hist is not None and not hist.empty:
+            v = float(hist["Close"].dropna().iloc[-1])
+            if v > 0:
+                return v
+        # Fallback to 5d if 1d failed
+        hist = t.history(period="5d", interval="1d", timeout=3)
+        if hist is not None and not hist.empty:
+            v = float(hist["Close"].dropna().iloc[-1])
+            return v if v > 0 else None
     except Exception as e:
         print(f"[yfinance] {s}: {e}")
     return None
@@ -136,8 +142,53 @@ def fetch_latest_price(symbol: str) -> Optional[float]:
     _set_cached(s, price)
     return price
 
-def batch_fetch_latest_prices(symbols: Iterable[str]) -> Dict[str, Optional[float]]:
+def batch_fetch_latest_prices(symbols: Iterable[str], timeout_per_symbol: float = 2.0) -> Dict[str, Optional[float]]:
+    """Batch fetch prices - check cache first, then fetch missing ones with timeout."""
+    import threading
+    
     out: Dict[str, Optional[float]] = {}
-    for sym in { (sym or "").upper().strip().replace("$","") for sym in symbols }:
-        out[sym] = fetch_latest_price(sym)
+    unique_symbols = { (sym or "").upper().strip().replace("$","") for sym in symbols if sym }
+    
+    # First pass: check cache for all symbols
+    uncached_symbols = []
+    for sym in unique_symbols:
+        cached = _get_cached(sym)
+        if cached is not None:
+            out[sym] = cached
+        else:
+            uncached_symbols.append(sym)
+    
+    # Second pass: fetch only uncached symbols with timeout protection
+    # Use a simple timeout wrapper to prevent hanging
+    for sym in uncached_symbols:
+        try:
+            # Try to fetch with a timeout
+            result = [None]
+            exception = [None]
+            
+            def fetch_with_timeout():
+                try:
+                    result[0] = fetch_latest_price(sym)
+                except Exception as e:
+                    exception[0] = e
+            
+            thread = threading.Thread(target=fetch_with_timeout)
+            thread.daemon = True
+            thread.start()
+            thread.join(timeout=timeout_per_symbol)
+            
+            if thread.is_alive():
+                # Timeout occurred - use None and continue
+                print(f"[Price fetch] Timeout for {sym}, using avg_price fallback")
+                out[sym] = None
+            else:
+                if exception[0]:
+                    print(f"[Price fetch] Error for {sym}: {exception[0]}")
+                    out[sym] = None
+                else:
+                    out[sym] = result[0]
+        except Exception as e:
+            print(f"[Price fetch] Exception for {sym}: {e}")
+            out[sym] = None
+    
     return out

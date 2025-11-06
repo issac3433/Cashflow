@@ -30,6 +30,7 @@ class Portfolio(SQLModel, table=True):
     user_id: str = Field(foreign_key="user.id")
     name: str = Field(default="Default")
     portfolio_type: str = Field(default="individual")  # "individual" or "retirement"
+    cash_balance: float = Field(default=0.0)  # Cash balance for this portfolio
     created_at: datetime = Field(default_factory=datetime.utcnow)
     # user: Optional[User] = Relationship(back_populates="portfolios")      # ← remove
     # holdings: list["Holding"] = Relationship(back_populates="portfolio")  # ← remove

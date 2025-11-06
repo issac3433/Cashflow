@@ -81,17 +81,23 @@ def get_portfolio(
     symbols = [h.symbol for h in holdings]
     prices = {}
     
-    try:
-        prices = batch_fetch_latest_prices(symbols) if symbols else {}
-    except Exception as e:
-        print(f"[Portfolio] Error fetching prices: {e}")
-        # Continue with avg_price as fallback
+    # Try to fetch prices, but use avg_price as fallback if it fails or times out
+    # This prevents the entire endpoint from being slow
+    if symbols:
+        try:
+            prices = batch_fetch_latest_prices(symbols)
+        except Exception as e:
+            print(f"[Portfolio] Error fetching prices: {e}")
+            # Continue with avg_price as fallback - don't fail the whole request
+            prices = {}
     
     total_value = 0.0
     holdings_with_quotes = []
     
     for holding in holdings:
-        latest_price = prices.get(holding.symbol, holding.avg_price)
+        # Use fetched price if available, otherwise fallback to avg_price
+        symbol_key = holding.symbol.upper()
+        latest_price = prices.get(symbol_key) if prices.get(symbol_key) is not None else holding.avg_price
         market_value = latest_price * holding.shares
         total_value += market_value
         
@@ -111,6 +117,7 @@ def get_portfolio(
             "name": portfolio.name,
             "portfolio_type": portfolio.portfolio_type,
             "user_id": portfolio.user_id,
+            "cash_balance": portfolio.cash_balance or 0.0,
             "created_at": portfolio.created_at,
         },
         "holdings": holdings_with_quotes,
