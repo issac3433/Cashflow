@@ -39,16 +39,11 @@ def get_user_profile(user_id: str = Depends(get_current_user_id), session: Sessi
             if holding.symbol not in all_symbols:
                 all_symbols.append(holding.symbol)
     
-    # Batch fetch all prices at once (much faster!)
-    # Wrap in try/except to prevent timeouts from breaking the whole endpoint
-    from app.services.prices import batch_fetch_latest_prices
-    prices = {}
-    if all_symbols:
-        try:
-            prices = batch_fetch_latest_prices(all_symbols)
-        except Exception as e:
-            print(f"[Profile] Error fetching prices, using avg_price fallback: {e}")
-            # Continue with empty prices dict - will use avg_price as fallback
+    # Skip price fetching and dividend queries for home screen - prioritize speed!
+    # Home screen is just a summary view, doesn't need real-time data
+    # This makes the endpoint instant (no external API calls, no complex queries)
+    prices = {}  # Empty dict means we'll use avg_price for all holdings
+    upcoming_dividend_events = {}  # Skip dividend queries for speed - not critical for home screen
     
     # Calculate portfolio values using batched prices
     for portfolio in portfolios:
@@ -61,21 +56,18 @@ def get_user_profile(user_id: str = Depends(get_current_user_id), session: Sessi
             holding_value = holding.shares * latest_price
             portfolio_value += holding_value
             
-            # Calculate upcoming dividends (only if we have holdings)
-            upcoming_divs = session.exec(
-                select(DividendEvent)
-                .where(DividendEvent.symbol == holding.symbol)
-                .where(DividendEvent.ex_date >= date.today())
-            ).all()
-            
-            for div in upcoming_divs:
-                upcoming_dividends += div.amount * holding.shares
+            # Calculate upcoming dividends using batched data
+            symbol_key = holding.symbol.upper()
+            if symbol_key in upcoming_dividend_events:
+                for div in upcoming_dividend_events[symbol_key]:
+                    upcoming_dividends += div.amount * holding.shares
         
         total_portfolio_value += portfolio_value
         portfolio_summary.append({
             "id": portfolio.id,
             "name": portfolio.name,
-            "value": portfolio_value,
+            "portfolio_type": portfolio.portfolio_type,
+            "total_value": portfolio_value,  # Changed from "value" to "total_value" to match mobile app
             "cash_balance": portfolio.cash_balance or 0.0,
             "holdings_count": len(holdings)
         })

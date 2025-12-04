@@ -142,9 +142,10 @@ def fetch_latest_price(symbol: str) -> Optional[float]:
     _set_cached(s, price)
     return price
 
-def batch_fetch_latest_prices(symbols: Iterable[str], timeout_per_symbol: float = 2.0) -> Dict[str, Optional[float]]:
-    """Batch fetch prices - check cache first, then fetch missing ones with timeout."""
+def batch_fetch_latest_prices(symbols: Iterable[str], timeout_per_symbol: float = 1.0, max_total_timeout: float = 3.0) -> Dict[str, Optional[float]]:
+    """Batch fetch prices - check cache first, then fetch missing ones in parallel with timeout."""
     import threading
+    import time as time_module
     
     out: Dict[str, Optional[float]] = {}
     unique_symbols = { (sym or "").upper().strip().replace("$","") for sym in symbols if sym }
@@ -158,37 +159,54 @@ def batch_fetch_latest_prices(symbols: Iterable[str], timeout_per_symbol: float 
         else:
             uncached_symbols.append(sym)
     
-    # Second pass: fetch only uncached symbols with timeout protection
-    # Use a simple timeout wrapper to prevent hanging
-    for sym in uncached_symbols:
+    # If all symbols are cached, return immediately
+    if not uncached_symbols:
+        return out
+    
+    # Second pass: fetch uncached symbols in parallel with timeout protection
+    results: Dict[str, Optional[float]] = {}
+    exceptions: Dict[str, Optional[Exception]] = {}
+    threads: Dict[str, threading.Thread] = {}
+    
+    def fetch_symbol(sym: str):
         try:
-            # Try to fetch with a timeout
-            result = [None]
-            exception = [None]
-            
-            def fetch_with_timeout():
-                try:
-                    result[0] = fetch_latest_price(sym)
-                except Exception as e:
-                    exception[0] = e
-            
-            thread = threading.Thread(target=fetch_with_timeout)
-            thread.daemon = True
-            thread.start()
-            thread.join(timeout=timeout_per_symbol)
-            
-            if thread.is_alive():
-                # Timeout occurred - use None and continue
-                print(f"[Price fetch] Timeout for {sym}, using avg_price fallback")
+            results[sym] = fetch_latest_price(sym)
+        except Exception as e:
+            exceptions[sym] = e
+    
+    # Start all threads in parallel
+    start_time = time_module.time()
+    for sym in uncached_symbols:
+        thread = threading.Thread(target=fetch_symbol, args=(sym,))
+        thread.daemon = True
+        thread.start()
+        threads[sym] = thread
+    
+    # Wait for all threads with overall timeout
+    for sym, thread in threads.items():
+        remaining_time = max_total_timeout - (time_module.time() - start_time)
+        if remaining_time <= 0:
+            # Overall timeout reached - stop waiting
+            print(f"[Price fetch] Overall timeout reached, using avg_price fallback for remaining symbols")
+            break
+        
+        thread.join(timeout=min(timeout_per_symbol, remaining_time))
+        
+        if thread.is_alive():
+            # Individual timeout - use None
+            print(f"[Price fetch] Timeout for {sym}, using avg_price fallback")
+            out[sym] = None
+        else:
+            # Thread completed
+            if sym in exceptions:
+                print(f"[Price fetch] Error for {sym}: {exceptions[sym]}")
                 out[sym] = None
             else:
-                if exception[0]:
-                    print(f"[Price fetch] Error for {sym}: {exception[0]}")
-                    out[sym] = None
-                else:
-                    out[sym] = result[0]
-        except Exception as e:
-            print(f"[Price fetch] Exception for {sym}: {e}")
+                out[sym] = results.get(sym)
+    
+    # Set None for any symbols that didn't complete
+    for sym in uncached_symbols:
+        if sym not in out:
             out[sym] = None
     
     return out
