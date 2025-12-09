@@ -354,7 +354,6 @@ Nathaniel Issac
 ## 🙏 Acknowledgments
 
 - Supabase for authentication infrastructure
-- Polygon.io for market data
-- Expo team for React Native tooling
+- Polygon.io for market dat
 - FastAPI for the excellent Python framework
 
