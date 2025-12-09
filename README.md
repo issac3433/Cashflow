@@ -39,8 +39,8 @@ A comprehensive mobile application for managing investment portfolios with real-
 - **Pandas & NumPy** - Data analysis and calculations
 
 ### Infrastructure
-- **SQLite** - Local database (development)
-- **PostgreSQL** - Production database (via Supabase)
+- **Neon PostgreSQL** - Cloud database (serverless PostgreSQL)
+- **Supabase** - Authentication service only
 - **Redis** - Caching and task queue (optional)
 - **Celery** - Background task processing (optional)
 
@@ -84,7 +84,8 @@ Capstone/
 - Python 3.10+
 - iOS: Xcode (for iOS development)
 - Android: Android Studio (for Android development)
-- Supabase account (for authentication)
+- Neon PostgreSQL account (for database)
+- Supabase account (for authentication only)
 
 ### 1. Clone and Setup
 
@@ -107,8 +108,9 @@ pip install -r requirements.txt
 
 # Configure environment variables
 # Create .env file with:
-# SUPABASE_URL=your_supabase_url
-# SUPABASE_KEY=your_supabase_key
+# DATABASE_URL=your_neon_postgresql_url
+# SUPABASE_URL=your_supabase_url (for authentication only)
+# SUPABASE_ANON_KEY=your_supabase_anon_key (for authentication only)
 # POLYGON_API_KEY=your_polygon_api_key (optional)
 # ALPHAVANTAGE_API_KEY=your_alpha_key (optional)
 ```
@@ -247,8 +249,9 @@ Update `mobile/src/services/api.ts` with your Mac's IP address for physical devi
 
 **Backend (.env)**
 ```
-SUPABASE_URL=your_supabase_url
-SUPABASE_KEY=your_supabase_key
+DATABASE_URL=your_neon_postgresql_url
+SUPABASE_URL=your_supabase_url (for authentication only)
+SUPABASE_ANON_KEY=your_supabase_anon_key (for authentication only)
 POLYGON_API_KEY=your_polygon_key (optional)
 ALPHAVANTAGE_API_KEY=your_alpha_key (optional)
 ```
@@ -353,7 +356,8 @@ Nathaniel Issac
 
 ## 🙏 Acknowledgments
 
+- Neon PostgreSQL for serverless database infrastructure
 - Supabase for authentication infrastructure
-- Polygon.io for market dat
+- Polygon.io for market data
 - FastAPI for the excellent Python framework
 
