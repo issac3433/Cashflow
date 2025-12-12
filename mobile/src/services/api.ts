@@ -10,8 +10,8 @@ const getApiBaseUrl = () => {
   // Common Mac IP addresses - will try these in order
   // The app will automatically detect which one works
   const possibleMacIPs = [
-    '10.0.0.93',  // School WiFi
-    '10.0.0.128', // Previous IP
+    '10.0.0.128', // Current school WiFi IP
+    '10.0.0.93',  // Previous school WiFi IP
     '192.168.1.100', // Common home network
     '192.168.0.100', // Alternative home network
   ];
