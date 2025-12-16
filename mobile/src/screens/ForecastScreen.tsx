@@ -38,6 +38,7 @@ export default function ForecastScreen({ navigation }: any) {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [selectedPortfolioId, setSelectedPortfolioId] = useState<number | null>(null);
   const [months, setMonths] = useState(12);
+  const [monthsText, setMonthsText] = useState('12'); // String state for input
   const [growthScenario, setGrowthScenario] = useState('moderate');
   const [reinvest, setReinvest] = useState(true);
   const [recurringDeposit, setRecurringDeposit] = useState('0');
@@ -119,8 +120,27 @@ export default function ForecastScreen({ navigation }: any) {
           <Text style={styles.label}>Forecast Period (months)</Text>
           <TextInput
             style={styles.input}
-            value={months.toString()}
-            onChangeText={(text) => setMonths(parseInt(text) || 12)}
+            value={monthsText}
+            onChangeText={(text) => {
+              // Allow empty string and numbers only
+              if (text === '' || /^\d+$/.test(text)) {
+                setMonthsText(text);
+                const num = parseInt(text);
+                if (!isNaN(num) && num > 0) {
+                  setMonths(num);
+                }
+              }
+            }}
+            onBlur={() => {
+              // Validate on blur - if empty or invalid, set to default
+              const num = parseInt(monthsText);
+              if (isNaN(num) || num <= 0) {
+                setMonthsText('12');
+                setMonths(12);
+              } else {
+                setMonthsText(num.toString());
+              }
+            }}
             keyboardType="numeric"
             placeholder="12"
           />

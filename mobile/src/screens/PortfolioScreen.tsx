@@ -12,6 +12,7 @@ import {
   Modal,
   KeyboardAvoidingView,
   Platform,
+  FlatList,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { api, Portfolio, Holding } from '../services/api';
@@ -30,6 +31,9 @@ export default function PortfolioScreen({ route, navigation }: any) {
   const [sellShares, setSellShares] = useState('');
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
   const [priceLoading, setPriceLoading] = useState(false);
+  const [symbolSuggestions, setSymbolSuggestions] = useState<Array<{symbol: string; name: string; price?: number}>>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   const loadPortfolio = async () => {
     try {
@@ -41,7 +45,7 @@ export default function PortfolioScreen({ route, navigation }: any) {
       setPortfolio(data.portfolio);
       setHoldings(data.holdings);
     } catch (error) {
-      console.error('Failed to load portfolio:', error);
+      // Silently handle errors - only show alert for critical failures
       Alert.alert('Error', 'Failed to load portfolio');
     } finally {
       setLoading(false);
@@ -53,10 +57,38 @@ export default function PortfolioScreen({ route, navigation }: any) {
     loadPortfolio();
   }, [portfolioId]);
 
+  // Search for symbol suggestions when typing
+  useEffect(() => {
+    const searchSymbols = async () => {
+      if (symbol && symbol.length >= 2) {
+        setSearchLoading(true);
+        setShowSuggestions(true);
+        try {
+          const data = await api.get<{results: Array<{symbol: string; name: string; price?: number}>}>(
+            `/symbols/suggest?q=${encodeURIComponent(symbol)}&limit=8`
+          );
+          setSymbolSuggestions(data.results || []);
+        } catch (error) {
+          // Silently handle errors - just show empty results
+          setSymbolSuggestions([]);
+        } finally {
+          setSearchLoading(false);
+        }
+      } else {
+        setSymbolSuggestions([]);
+        setShowSuggestions(false);
+      }
+    };
+
+    // Debounce search
+    const timeoutId = setTimeout(searchSymbols, 300);
+    return () => clearTimeout(timeoutId);
+  }, [symbol]);
+
   // Fetch current price when symbol changes (for buying)
   useEffect(() => {
     const fetchPrice = async () => {
-      if (symbol && symbol.length >= 1) {
+      if (symbol && symbol.length >= 1 && !showSuggestions) {
         setPriceLoading(true);
         try {
           const priceData = await api.get<{ symbol: string; price: number | null }>(
@@ -64,7 +96,7 @@ export default function PortfolioScreen({ route, navigation }: any) {
           );
           setCurrentPrice(priceData.price);
         } catch (error) {
-          console.error('Failed to fetch price:', error);
+          // Silently handle errors - just set price to null
           setCurrentPrice(null);
         } finally {
           setPriceLoading(false);
@@ -77,7 +109,7 @@ export default function PortfolioScreen({ route, navigation }: any) {
     // Debounce price fetching
     const timeoutId = setTimeout(fetchPrice, 500);
     return () => clearTimeout(timeoutId);
-  }, [symbol]);
+  }, [symbol, showSuggestions]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -276,6 +308,8 @@ export default function PortfolioScreen({ route, navigation }: any) {
                       setShowAddModal(false);
                       setSymbol('');
                       setShares('');
+                      setSymbolSuggestions([]);
+                      setShowSuggestions(false);
                       setCurrentPrice(null);
                     }}
                   >
@@ -283,14 +317,73 @@ export default function PortfolioScreen({ route, navigation }: any) {
                   </TouchableOpacity>
                 </View>
                 <View style={styles.modalInputContainer}>
-                  <TextInput
-                    style={styles.modalInput}
-                    placeholder="Symbol (e.g., AAPL)"
-                    value={symbol}
-                    onChangeText={setSymbol}
-                    autoCapitalize="characters"
-                    placeholderTextColor="#999"
-                  />
+                  <View style={styles.symbolInputContainer}>
+                    <TextInput
+                      style={styles.modalInput}
+                      placeholder="Search stock (e.g., Apple, AAPL)"
+                      value={symbol}
+                      onChangeText={(text) => {
+                        setSymbol(text);
+                        if (text.length >= 2) {
+                          setShowSuggestions(true);
+                        } else {
+                          setShowSuggestions(false);
+                        }
+                      }}
+                      onFocus={() => {
+                        if (symbol.length >= 2) {
+                          setShowSuggestions(true);
+                        }
+                      }}
+                      autoCapitalize="none"
+                      placeholderTextColor="#999"
+                    />
+                    {searchLoading && (
+                      <ActivityIndicator size="small" color="#007AFF" style={styles.searchIndicator} />
+                    )}
+                  </View>
+                  
+                  {/* Symbol Suggestions */}
+                  {showSuggestions && symbol.length >= 2 && symbolSuggestions.length > 0 && (
+                    <View style={styles.suggestionsContainer}>
+                      <FlatList
+                        data={symbolSuggestions}
+                        keyExtractor={(item) => item.symbol}
+                        renderItem={({ item }) => (
+                          <TouchableOpacity
+                            style={styles.suggestionItem}
+                            onPress={() => {
+                              setSymbol(item.symbol);
+                              setShowSuggestions(false);
+                              setCurrentPrice(item.price || null);
+                              setSymbolSuggestions([]); // Clear suggestions
+                            }}
+                          >
+                            <View style={styles.suggestionContent}>
+                              <Text style={styles.suggestionSymbol}>{item.symbol}</Text>
+                              <Text style={styles.suggestionName} numberOfLines={1}>
+                                {item.name}
+                              </Text>
+                            </View>
+                            {item.price && (
+                              <Text style={styles.suggestionPrice}>
+                                ${item.price.toFixed(2)}
+                              </Text>
+                            )}
+                          </TouchableOpacity>
+                        )}
+                        style={styles.suggestionsList}
+                        keyboardShouldPersistTaps="handled"
+                      />
+                    </View>
+                  )}
+                  
+                  {showSuggestions && symbol.length >= 2 && !searchLoading && symbolSuggestions.length === 0 && (
+                    <View style={styles.noSuggestions}>
+                      <Text style={styles.noSuggestionsText}>No stocks found</Text>
+                    </View>
+                  )}
+                  
                   <TextInput
                     style={styles.modalInput}
                     placeholder="Shares"
@@ -350,9 +443,7 @@ export default function PortfolioScreen({ route, navigation }: any) {
                           </>
                         )}
                       </>
-                    ) : (
-                      <Text style={styles.calculationLabel}>Enter a valid symbol</Text>
-                    )}
+                    ) : null}
                   </View>
                 )}
                 
@@ -363,6 +454,9 @@ export default function PortfolioScreen({ route, navigation }: any) {
                       setShowAddModal(false);
                       setSymbol('');
                       setShares('');
+                      setSymbolSuggestions([]);
+                      setShowSuggestions(false);
+                      setCurrentPrice(null);
                     }}
                   >
                     <Text style={styles.cancelButtonText}>Cancel</Text>
@@ -775,6 +869,66 @@ const styles = StyleSheet.create({
     color: '#155724',
     flex: 1,
     fontWeight: '500',
+  },
+  symbolInputContainer: {
+    position: 'relative',
+  },
+  searchIndicator: {
+    position: 'absolute',
+    right: 12,
+    top: 16,
+  },
+  suggestionsContainer: {
+    maxHeight: 200,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginTop: 4,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  suggestionsList: {
+    maxHeight: 200,
+  },
+  suggestionItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  suggestionContent: {
+    flex: 1,
+    marginRight: 8,
+  },
+  suggestionSymbol: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 2,
+  },
+  suggestionName: {
+    fontSize: 13,
+    color: '#666',
+  },
+  suggestionPrice: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  noSuggestions: {
+    padding: 12,
+    alignItems: 'center',
+  },
+  noSuggestionsText: {
+    fontSize: 14,
+    color: '#999',
   },
 });
 

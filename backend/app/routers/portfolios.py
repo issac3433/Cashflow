@@ -77,6 +77,11 @@ def get_portfolio(
         select(Holding).where(Holding.portfolio_id == portfolio_id)
     ).all()
     
+    # Debug: Log all holdings found
+    print(f"[Portfolio] Found {len(holdings)} holdings for portfolio {portfolio_id}")
+    for h in holdings:
+        print(f"[Portfolio] Holding: {h.symbol} ({h.shares} shares)")
+    
     # Calculate portfolio value with error handling
     symbols = [h.symbol for h in holdings]
     prices = {}
@@ -97,17 +102,24 @@ def get_portfolio(
     for holding in holdings:
         # Use fetched price if available, otherwise fallback to avg_price
         symbol_key = holding.symbol.upper()
-        latest_price = prices.get(symbol_key) if prices.get(symbol_key) is not None else holding.avg_price
-        market_value = latest_price * holding.shares
-        total_value += market_value
+        current_price = prices.get(symbol_key) if prices.get(symbol_key) is not None else holding.avg_price
+        current_value = current_price * holding.shares
+        total_value += current_value
+        
+        # Calculate gain/loss
+        cost_basis = holding.avg_price * holding.shares
+        gain_loss = current_value - cost_basis
+        gain_loss_percent = (gain_loss / cost_basis * 100) if cost_basis > 0 else 0
         
         holdings_with_quotes.append({
             "id": holding.id,
             "symbol": holding.symbol,
             "shares": holding.shares,
             "avg_price": holding.avg_price,
-            "latest_price": latest_price,
-            "market_value": market_value,
+            "current_price": current_price,  # Changed from latest_price to match frontend
+            "current_value": current_value,   # Added to match frontend
+            "gain_loss": gain_loss,           # Added for frontend display
+            "gain_loss_percent": gain_loss_percent,  # Added for frontend display
             "reinvest_dividends": holding.reinvest_dividends,
         })
     

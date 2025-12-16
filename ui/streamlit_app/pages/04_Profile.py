@@ -94,7 +94,7 @@ if profile_data.get('portfolios'):
         # Portfolio header with cash balance
         with st.expander(f"💰 **{portfolio_name}** - Cash Balance: ${portfolio_cash:,.2f}", expanded=True):
             col_add, col_withdraw = st.columns(2)
-            
+
             with col_add:
                 st.write(f"**➕ Add Cash to {portfolio_name}**")
                 add_amount = st.number_input(
@@ -105,17 +105,17 @@ if profile_data.get('portfolios'):
                     key=f"add_cash_{portfolio_id}"
                 )
                 if st.button("Add Cash", key=f"add_cash_btn_{portfolio_id}", type="primary"):
-                    try:
+        try:
                         result = api_post("/profile/cash/add", json={
                             "amount": add_amount,
                             "portfolio_id": portfolio_id
                         })
-                        st.success(result["message"])
+            st.success(result["message"])
                         st.info(f"💰 New balance: ${result.get('new_balance', portfolio_cash):,.2f}")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to add cash: {e}")
-            
+            st.rerun()
+        except Exception as e:
+            st.error(f"Failed to add cash: {e}")
+
             with col_withdraw:
                 st.write(f"**➖ Withdraw Cash from {portfolio_name}**")
                 withdraw_amount = st.number_input(
@@ -126,16 +126,16 @@ if profile_data.get('portfolios'):
                     key=f"withdraw_cash_{portfolio_id}"
                 )
                 if st.button("Withdraw Cash", key=f"withdraw_cash_btn_{portfolio_id}", type="primary"):
-                    try:
+        try:
                         result = api_post("/profile/cash/withdraw", json={
                             "amount": withdraw_amount,
                             "portfolio_id": portfolio_id
                         })
-                        st.success(result["message"])
+            st.success(result["message"])
                         st.info(f"💰 New balance: ${result.get('new_balance', portfolio_cash):,.2f}")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to withdraw cash: {e}")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Failed to withdraw cash: {e}")
 else:
     st.warning("⚠️ No portfolios found. Please create a portfolio first.")
 

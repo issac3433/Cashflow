@@ -23,11 +23,24 @@ interface RiskData {
   sharpe_ratio: number;
   max_drawdown: number;
   var_95: number;
+  var_99?: number;
   concentration_risk: number;
   concentration?: {
     max_weight: number;
     top_holdings: Array<{ symbol: string; weight: number }>;
   };
+  dividend_risks?: Record<string, {
+    sustainability_score: number;
+    risk_level: string;
+    last_payment: string;
+  }>;
+  earnings_risks?: Record<string, {
+    overall_risk_level: string;
+    earnings_risk_score: number;
+  }>;
+  recommendations?: string[];
+  portfolio_value?: number;
+  num_holdings?: number;
 }
 
 export default function RiskAnalysisScreen() {
@@ -65,26 +78,45 @@ export default function RiskAnalysisScreen() {
       const endpoint = analysisType === 'Comprehensive' 
         ? `/risk/analysis/${selectedPortfolioId}`
         : `/risk/metrics/${selectedPortfolioId}`;
-      const data = await api.get<RiskData>(endpoint);
+      const data = await api.get<any>(endpoint);
+      
+      // Check if there's an error (no holdings)
+      if (data.error || !data.has_holdings) {
+        // Clear risk data to show empty state
+        setRiskData(null);
+        return;
+      }
+      
       setRiskData(data);
     } catch (error: any) {
-      console.error('Risk analysis failed:', error);
-      Alert.alert('Error', error.response?.data?.detail || 'Failed to run risk analysis');
+      // On error, clear data to show empty state instead of alert
+      setRiskData(null);
+      // Only show alert for non-500 errors (network issues, etc.)
+      if (error.response?.status !== 500) {
+        console.error('Risk analysis failed:', error);
+        Alert.alert('Error', error.response?.data?.detail || 'Failed to run risk analysis');
+      }
     } finally {
       setLoading(false);
     }
   };
 
   const getRiskColor = (level: string) => {
-    switch (level.toLowerCase()) {
+    const normalizedLevel = level.toLowerCase().trim();
+    switch (normalizedLevel) {
       case 'low':
-        return colors.success;
+      case 'very low':
+        return colors.success; // Green for low risk
       case 'moderate':
-        return colors.warning;
+      case 'medium':
+        return colors.warning; // Yellow/Orange for moderate risk
       case 'high':
-        return colors.error;
+        return colors.error; // Red for high risk
+      case 'very high':
+      case 'extreme':
+        return '#8B0000'; // Dark red for very high risk
       default:
-        return colors.textSecondary;
+        return colors.textSecondary; // Gray for unknown
     }
   };
 
@@ -144,6 +176,16 @@ export default function RiskAnalysisScreen() {
         )}
       </TouchableOpacity>
 
+      {!riskData && !loading && selectedPortfolioId && (
+        <View style={styles.emptyContainer}>
+          <Ionicons name="analytics-outline" size={64} color={colors.textTertiary} />
+          <Text style={styles.emptyText}>No Stocks to Analyze</Text>
+          <Text style={styles.emptySubtext}>
+            Add stocks to your portfolio to see risk analysis here!
+          </Text>
+        </View>
+      )}
+
       {riskData && (
         <View style={styles.resultsCard}>
           <Text style={styles.resultsTitle}>Risk Overview</Text>
@@ -155,7 +197,17 @@ export default function RiskAnalysisScreen() {
                 {riskData.overall_risk_level.toUpperCase()}
               </Text>
             </View>
-            <Text style={styles.riskScoreValue}>Score: {riskData.risk_score.toFixed(1)}/100</Text>
+            <Text style={[styles.riskScoreValue, { color: getRiskColor(riskData.overall_risk_level) }]}>
+              Score: {riskData.risk_score.toFixed(1)}/100
+            </Text>
+            <View style={styles.scoreExplanation}>
+              <Text style={styles.scoreExplanationText}>
+                {riskData.risk_score >= 70 && '🟢 Low Risk (70-100): Stable, well-diversified portfolio'}
+                {riskData.risk_score >= 50 && riskData.risk_score < 70 && '🟡 Medium Risk (50-69): Moderate volatility, some concentration'}
+                {riskData.risk_score >= 30 && riskData.risk_score < 50 && '🟠 High Risk (30-49): High volatility, concentrated positions'}
+                {riskData.risk_score < 30 && '🔴 Very High Risk (0-29): Extreme volatility, high concentration risk'}
+              </Text>
+            </View>
           </View>
 
           <View style={styles.metricsGrid}>
@@ -209,6 +261,114 @@ export default function RiskAnalysisScreen() {
               ))}
             </View>
           )}
+
+          {/* Comprehensive Analysis - Additional Metrics */}
+          {analysisType === 'Comprehensive' && (
+            <>
+              {/* Portfolio Summary */}
+              {(riskData.portfolio_value !== undefined || riskData.num_holdings !== undefined) && (
+                <View style={styles.comprehensiveSection}>
+                  <Text style={styles.sectionTitle}>Portfolio Summary</Text>
+                  {riskData.portfolio_value !== undefined && (
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>Total Portfolio Value:</Text>
+                      <Text style={styles.summaryValue}>
+                        ${riskData.portfolio_value.toLocaleString('en-US', {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </Text>
+                    </View>
+                  )}
+                  {riskData.num_holdings !== undefined && (
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>Number of Holdings:</Text>
+                      <Text style={styles.summaryValue}>{riskData.num_holdings}</Text>
+                    </View>
+                  )}
+                  {riskData.var_99 !== undefined && (
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>VaR (99%):</Text>
+                      <Text style={styles.summaryValue}>
+                        ${Math.abs(riskData.var_99).toLocaleString('en-US', {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              )}
+
+              {/* Dividend Risk Analysis */}
+              {riskData.dividend_risks && Object.keys(riskData.dividend_risks).length > 0 && (
+                <View style={styles.comprehensiveSection}>
+                  <Text style={styles.sectionTitle}>Dividend Risk Analysis</Text>
+                  {Object.entries(riskData.dividend_risks).map(([symbol, risk]) => (
+                    <View key={symbol} style={styles.riskItem}>
+                      <View style={styles.riskItemHeader}>
+                        <Text style={styles.riskSymbol}>{symbol}</Text>
+                        <View style={[
+                          styles.riskBadgeSmall,
+                          { backgroundColor: getRiskColor(risk.risk_level) + '20' }
+                        ]}>
+                          <Text style={[styles.riskBadgeTextSmall, { color: getRiskColor(risk.risk_level) }]}>
+                            {risk.risk_level}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={styles.riskDetail}>
+                        Sustainability: {risk.sustainability_score.toFixed(1)}/100
+                      </Text>
+                      {risk.last_payment && (
+                        <Text style={styles.riskDetail}>
+                          Last Payment: {risk.last_payment}
+                        </Text>
+                      )}
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Earnings Risk Analysis */}
+              {riskData.earnings_risks && Object.keys(riskData.earnings_risks).length > 0 && (
+                <View style={styles.comprehensiveSection}>
+                  <Text style={styles.sectionTitle}>Earnings Risk Analysis</Text>
+                  {Object.entries(riskData.earnings_risks).map(([symbol, risk]) => (
+                    <View key={symbol} style={styles.riskItem}>
+                      <View style={styles.riskItemHeader}>
+                        <Text style={styles.riskSymbol}>{symbol}</Text>
+                        <View style={[
+                          styles.riskBadgeSmall,
+                          { backgroundColor: getRiskColor(risk.overall_risk_level) + '20' }
+                        ]}>
+                          <Text style={[styles.riskBadgeTextSmall, { color: getRiskColor(risk.overall_risk_level) }]}>
+                            {risk.overall_risk_level}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={styles.riskDetail}>
+                        Risk Score: {risk.earnings_risk_score.toFixed(1)}/100
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Risk Recommendations */}
+              {riskData.recommendations && riskData.recommendations.length > 0 && (
+                <View style={styles.comprehensiveSection}>
+                  <Text style={styles.sectionTitle}>Risk Recommendations</Text>
+                  {riskData.recommendations.map((recommendation, index) => (
+                    <View key={index} style={styles.recommendationItem}>
+                      <Ionicons name="bulb" size={16} color={colors.warning} style={styles.recommendationIcon} />
+                      <Text style={styles.recommendationText}>{recommendation}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </>
+          )}
         </View>
       )}
     </ScrollView>
@@ -258,11 +418,25 @@ const styles = StyleSheet.create({
   picker: {
     color: colors.text,
   },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.xl,
+    margin: spacing.lg,
+    minHeight: 300,
+  },
   emptyText: {
+    ...typography.h4,
+    color: colors.text,
+    marginTop: spacing.md,
+    marginBottom: spacing.xs,
+    textAlign: 'center',
+  },
+  emptySubtext: {
     ...typography.body,
     color: colors.textSecondary,
     textAlign: 'center',
-    padding: spacing.md,
   },
   button: {
     backgroundColor: colors.primary,
@@ -321,6 +495,18 @@ const styles = StyleSheet.create({
     ...typography.h4,
     color: colors.text,
   },
+  scoreExplanation: {
+    marginTop: spacing.sm,
+    padding: spacing.sm,
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: borderRadius.sm,
+  },
+  scoreExplanationText: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    fontSize: 12,
+  },
   metricsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -372,6 +558,76 @@ const styles = StyleSheet.create({
   holdingWeight: {
     ...typography.body,
     color: colors.textSecondary,
+  },
+  comprehensiveSection: {
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  summaryLabel: {
+    ...typography.body,
+    color: colors.textSecondary,
+  },
+  summaryValue: {
+    ...typography.body,
+    color: colors.text,
+    fontWeight: '600',
+  },
+  riskItem: {
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  riskItemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  riskSymbol: {
+    ...typography.body,
+    color: colors.text,
+    fontWeight: '600',
+  },
+  riskBadgeSmall: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: borderRadius.sm,
+  },
+  riskBadgeTextSmall: {
+    ...typography.caption,
+    fontWeight: '600',
+    fontSize: 11,
+  },
+  riskDetail: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    marginTop: spacing.xs,
+  },
+  recommendationItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  recommendationIcon: {
+    marginRight: spacing.sm,
+    marginTop: 2,
+  },
+  recommendationText: {
+    ...typography.body,
+    color: colors.text,
+    flex: 1,
   },
 });
 

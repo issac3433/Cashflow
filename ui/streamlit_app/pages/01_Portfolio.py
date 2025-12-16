@@ -148,7 +148,7 @@ def load_portfolio_details(portfolio_id):
     """Load detailed portfolio information with error handling."""
     try:
         with st.spinner("Loading portfolio..."):
-            return api_get(f"/portfolios/{portfolio_id}")
+        return api_get(f"/portfolios/{portfolio_id}")
     except Exception as e:
         error_msg = str(e)
         if "timed out" in error_msg.lower():
@@ -320,8 +320,8 @@ if portfolio_data and portfolio_data['holdings']:
                             # Clear only relevant caches
                             load_portfolio_details.clear()
                             load_user_profile.clear()
-                            st.rerun()
-                        except Exception as e:
+                    st.rerun()
+                except Exception as e:
                             st.error(f"Failed to sell: {e}")
                     
                     if st.button("❌ Cancel", key=f"cancel_sell_{holding_id}"):
@@ -464,7 +464,7 @@ with st.expander("Add New Holding", expanded=False):
         reinvest_dividends = st.checkbox("Reinvest Dividends", value=True)
     
     # Calculate estimated cost and validate cash
-    selected_symbol = st.session_state.get("selected_stock_symbol")
+        selected_symbol = st.session_state.get("selected_stock_symbol")
     estimated_cost = 0.0
     has_sufficient_cash = True
     
@@ -534,7 +534,7 @@ with st.expander("Add New Holding", expanded=False):
                     st.error(f"❌ {error_msg}")
                     st.info("💡 Go to Profile page to add more cash to your account.")
                 else:
-                    st.error(f"Failed to add holding: {e}")
+                st.error(f"Failed to add holding: {e}")
 
 # ----------------- Actions -----------------
 st.subheader("🔄 Actions")

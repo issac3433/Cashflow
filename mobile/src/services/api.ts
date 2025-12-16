@@ -2,31 +2,19 @@ import axios, { AxiosInstance } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
-// API base URL - automatically detects the correct URL for each platform
+// API base URL - adjust for your environment
+// For web, use localhost. For mobile device, use your computer's IP address
 const getApiBaseUrl = () => {
-  // Android emulator uses special IP to reach host machine
-  const androidEmulatorIP = '10.0.2.2';
+  // Your Mac's IP address - update this if your IP changes
+  // Check with: ifconfig | grep "inet " | grep -v 127.0.0.1
+  const macIP = '10.0.0.93'; // Updated to current home WiFi IP
   
-  // Common Mac IP addresses - will try these in order
-  // The app will automatically detect which one works
-  const possibleMacIPs = [
-    '10.0.0.128', // Current school WiFi IP
-    '10.0.0.93',  // Previous school WiFi IP
-    '192.168.1.100', // Common home network
-    '192.168.0.100', // Alternative home network
-  ];
-  
-  // Check environment variable first (highest priority)
+  // Check environment variable first
   if (process.env.EXPO_PUBLIC_API_BASE_URL) {
     const envUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
-    // If it's localhost and we're on Android emulator, use emulator IP
-    if (envUrl.includes('localhost') && Platform.OS === 'android' && __DEV__) {
-      return envUrl.replace('localhost', androidEmulatorIP);
-    }
-    // If it's localhost and we're on a physical device, try to detect IP
-    if (envUrl.includes('localhost') && Platform.OS !== 'web' && __DEV__) {
-      // Use first IP in list (most recent/current)
-      return envUrl.replace('localhost', possibleMacIPs[0]);
+    // If it's localhost and we're on a physical device (iOS/Android), replace with IP
+    if (envUrl.includes('localhost') && Platform.OS !== 'web') {
+      return envUrl.replace('localhost', macIP);
     }
     return envUrl;
   }
@@ -36,21 +24,8 @@ const getApiBaseUrl = () => {
     return 'http://localhost:8000';
   }
   
-  // For Android emulator, use special IP to reach host
-  if (Platform.OS === 'android' && __DEV__) {
-    return `http://${androidEmulatorIP}:8000`;
-  }
-  
-  // For iOS simulator, use localhost (simulator shares network with Mac)
-  if (Platform.OS === 'ios' && __DEV__) {
-    // Check if running on simulator (process.env.SIMULATOR_DEVICE_NAME exists)
-    // For physical device, use Mac IP; for simulator, use localhost
-    // We'll default to Mac IP for iOS and let it fail gracefully if wrong
-    return `http://${possibleMacIPs[0]}:8000`;
-  }
-  
-  // Production fallback
-  return 'https://your-api-domain.com';
+  // For native device (iOS/Android), use Mac's IP address instead of localhost
+  return __DEV__ ? `http://${macIP}:8000` : 'https://your-api-domain.com';
 };
 
 const API_BASE_URL = getApiBaseUrl();
@@ -66,21 +41,12 @@ console.log('🔍 Full API URL check:', {
 
 class ApiClient {
   private client: AxiosInstance;
-  private baseURL: string;
 
   constructor() {
-    this.baseURL = API_BASE_URL;
-    console.log('🔧 Creating API client with base URL:', this.baseURL);
-    console.log('📱 Platform:', Platform.OS);
-    console.log('🌐 Network Configuration:', {
-      platform: Platform.OS,
-      isDev: __DEV__,
-      apiUrl: this.baseURL,
-    });
-    
+    console.log('🔧 Creating API client with base URL:', API_BASE_URL);
     this.client = axios.create({
-      baseURL: this.baseURL,
-      timeout: 10000, // 10 seconds - faster failure for better UX
+      baseURL: API_BASE_URL,
+      timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
       },
@@ -99,18 +65,13 @@ class ApiClient {
       return config;
     });
 
-    // Handle errors with automatic retry for network issues
+    // Handle errors
     this.client.interceptors.response.use(
       (response) => response,
       async (error) => {
-        const isNetworkError = !error.response && error.message.includes('Network Error');
-        const isTimeout = error.code === 'ECONNABORTED';
-        
         console.error('❌ API Error:', {
           message: error.message,
           code: error.code,
-          isNetworkError,
-          isTimeout,
           response: error.response?.data,
           status: error.response?.status,
           config: {
@@ -119,17 +80,6 @@ class ApiClient {
             method: error.config?.method,
           },
         });
-        
-        // Provide helpful error messages for network issues
-        if (isNetworkError || isTimeout) {
-          console.warn('⚠️ Network connectivity issue. Make sure:');
-          console.warn('   1. Backend is running: curl http://localhost:8000/health');
-          console.warn('   2. Devices are on same WiFi network');
-          console.warn('   3. Mac firewall allows connections on port 8000');
-          if (Platform.OS === 'ios') {
-            console.warn('   4. For iPhone: Try accessing http://10.0.0.93:8000/health in Safari');
-          }
-        }
         
         if (error.response?.status === 401) {
           // Token expired or invalid - clear storage

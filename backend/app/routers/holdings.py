@@ -9,6 +9,7 @@ from app.db import get_session
 from app.models import Holding, UserProfile, Portfolio
 from app.core.security import get_current_user_id
 from app.services.prices import fetch_latest_price, batch_fetch_latest_prices
+from app.services.dividends import fetch_dividends, upsert_dividends
 
 router = APIRouter(tags=["holdings"])
 
@@ -124,6 +125,34 @@ def create_holding(
     
     # Refresh portfolio to get updated balance
     session.refresh(portfolio)
+    
+    # Automatically sync dividends for the new/updated symbol (non-blocking)
+    # This runs in the background so it doesn't slow down the holding creation response
+    import threading
+    def sync_dividends_async():
+        try:
+            # Use a separate session for the async operation to avoid blocking
+            from app.db import Session as DBSession, engine
+            with DBSession(engine) as async_session:
+                print(f"[Holdings] Auto-syncing dividends for {symbol} (async)...")
+                dividend_events = fetch_dividends(symbol)
+                print(f"[Holdings] fetch_dividends returned {len(dividend_events)} events for {symbol}")
+                
+                if dividend_events:
+                    inserted_count = upsert_dividends(async_session, dividend_events, commit=True)
+                    print(f"[Holdings] Auto-synced {inserted_count} dividend events for {symbol} (total events: {len(dividend_events)})")
+                else:
+                    print(f"[Holdings] No dividend events found for {symbol} - this may be normal for some stocks/ETFs")
+        except Exception as e:
+            # Log error but don't fail - this is background work
+            print(f"[Holdings] Failed to auto-sync dividends for {symbol}: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # Start async sync in background thread (non-blocking)
+    sync_thread = threading.Thread(target=sync_dividends_async, daemon=True)
+    sync_thread.start()
+    # Don't wait for it - let it run in background
     
     return {
         "holding": {
