@@ -91,15 +91,23 @@ def calculate_concentration_risk(holdings: List[Holding]) -> Dict[str, float]:
     if not holdings:
         return {"herfindahl_index": 0.0, "max_weight": 0.0, "top_5_weight": 0.0}
     
+    print(f"[Risk Analysis] Calculating concentration risk for {len(holdings)} holdings")
+    
     # Get current prices and calculate weights
     total_value = 0.0
     holding_values = []
     
+    # Batch fetch prices for better performance
+    symbols = [h.symbol.upper() for h in holdings]
+    prices = batch_fetch_latest_prices(symbols)
+    
     for holding in holdings:
-        price = fetch_latest_price(holding.symbol) or 100.0  # Fallback price
+        symbol_key = holding.symbol.upper()
+        price = prices.get(symbol_key) or holding.avg_price or 100.0  # Use fetched price, then avg_price, then fallback
         value = holding.shares * price
         holding_values.append(value)
         total_value += value
+        print(f"[Risk Analysis] {holding.symbol}: {holding.shares} shares @ ${price:.2f} = ${value:.2f}")
     
     if total_value == 0:
         return {"herfindahl_index": 0.0, "max_weight": 0.0, "top_5_weight": 0.0}
@@ -117,11 +125,20 @@ def calculate_concentration_risk(holdings: List[Holding]) -> Dict[str, float]:
     sorted_weights = sorted(weights, reverse=True)
     top_5_weight = sum(sorted_weights[:5])
     
+    # Create list of holdings with their weights for top holdings display
+    holdings_with_weights = [
+        {"symbol": holdings[i].symbol, "weight": weights[i]}
+        for i in range(len(holdings))
+    ]
+    # Sort by weight descending
+    holdings_with_weights.sort(key=lambda x: x["weight"], reverse=True)
+    
     return {
         "herfindahl_index": hhi,
         "max_weight": max_weight,
         "top_5_weight": top_5_weight,
-        "num_holdings": len(holdings)
+        "num_holdings": len(holdings),
+        "top_holdings": holdings_with_weights[:10]  # Top 10 holdings by weight
     }
 
 def calculate_dividend_risk(holdings: List[Holding], session: Session) -> Dict[str, any]:
@@ -196,20 +213,35 @@ def calculate_dividend_risk(holdings: List[Holding], session: Session) -> Dict[s
 def generate_risk_report(session: Session, portfolio_id: int) -> Dict[str, any]:
     """Generate comprehensive risk analysis report"""
     
-    # Get portfolio holdings
+    # Get portfolio holdings - ensure we get all holdings including newly added ones
+    # Refresh the session to ensure we see the latest data
+    session.expire_all()
+    
     holdings = session.exec(
         select(Holding).where(Holding.portfolio_id == portfolio_id)
     ).all()
     
+    # Debug logging
+    print(f"[Risk Analysis] Found {len(holdings)} holdings for portfolio {portfolio_id}")
+    for h in holdings:
+        print(f"[Risk Analysis] Holding: {h.symbol} ({h.shares} shares, id={h.id})")
+    
     if not holdings:
+        print(f"[Risk Analysis] No holdings found for portfolio {portfolio_id}")
         return {"error": "No holdings found for portfolio"}
     
     # Calculate portfolio metrics
+    # Batch fetch prices for all holdings at once (more efficient)
+    symbols = [h.symbol.upper() for h in holdings]
+    prices = batch_fetch_latest_prices(symbols)
+    
     portfolio_value = 0.0
     holding_details = []
     
     for holding in holdings:
-        price = fetch_latest_price(holding.symbol) or 100.0
+        symbol_key = holding.symbol.upper()
+        # Use fetched price, fallback to avg_price, then default
+        price = prices.get(symbol_key) if prices.get(symbol_key) is not None else (holding.avg_price or 100.0)
         value = holding.shares * price
         portfolio_value += value
         
@@ -220,6 +252,7 @@ def generate_risk_report(session: Session, portfolio_id: int) -> Dict[str, any]:
             "value": value,
             "weight": 0.0  # Will calculate after total
         })
+        print(f"[Risk Analysis] Processing {holding.symbol}: {holding.shares} shares @ ${price:.2f} = ${value:.2f}")
     
     # Calculate weights
     for detail in holding_details:

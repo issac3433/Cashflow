@@ -67,7 +67,7 @@ def _polygon_search(query: str, limit: int) -> List[Dict]:
     # Check if we're rate limited
     status = _get_api_call_status()
     if status["is_rate_limited"]:
-        print(f"[Polygon] Rate limit reached ({status['calls_used']}/{status['max_calls']} calls used). Wait {status['time_until_reset']:.0f}s")
+        # Silently return empty - rate limit handled gracefully
         return []
     
     url = "https://api.polygon.io/v3/reference/tickers"
@@ -79,8 +79,7 @@ def _polygon_search(query: str, limit: int) -> List[Dict]:
         _track_api_call()
         
         if not r.ok:
-            if r.status_code == 429:
-                print(f"[Polygon] Rate limit exceeded (429) for query: {query}")
+            # Silently handle rate limits and errors
             return []
         data = r.json()
         results = data.get("results") or []
@@ -95,28 +94,32 @@ def _polygon_search(query: str, limit: int) -> List[Dict]:
             })
         return out
     except Exception as e:
-        print(f"[Polygon] Error for query '{query}': {e}")
+        # Silently handle errors - return empty list
         return []
 
 def _alpha_search(query: str, limit: int) -> List[Dict]:
     if not ALPHA_KEY or not query.strip():
         return []
-    url = "https://www.alphavantage.co/query"
-    r = requests.get(url, params={"function":"SYMBOL_SEARCH","keywords":query.strip(),"apikey":ALPHA_KEY}, timeout=8)
-    if not r.ok:
+    try:
+        url = "https://www.alphavantage.co/query"
+        r = requests.get(url, params={"function":"SYMBOL_SEARCH","keywords":query.strip(),"apikey":ALPHA_KEY}, timeout=8)
+        if not r.ok:
+            return []
+        data = r.json() or {}
+        matches = data.get("bestMatches") or []
+        out = []
+        for m in matches[:limit]:
+            out.append({
+                "symbol": m.get("1. symbol"),
+                "name": m.get("2. name"),
+                "primary_exchange": m.get("4. region"),  # AV doesn't give exchange cleanly; region is still helpful
+                "locale": m.get("4. region"),
+                "source": "alphavantage"
+            })
+        return out
+    except Exception:
+        # Silently handle errors - return empty list
         return []
-    data = r.json() or {}
-    matches = data.get("bestMatches") or []
-    out = []
-    for m in matches[:limit]:
-        out.append({
-            "symbol": m.get("1. symbol"),
-            "name": m.get("2. name"),
-            "primary_exchange": m.get("4. region"),  # AV doesn't give exchange cleanly; region is still helpful
-            "locale": m.get("4. region"),
-            "source": "alphavantage"
-        })
-    return out
 
 def _get_fallback_results(query: str, limit: int) -> List[Dict]:
     """Get fallback results for common stocks to save API calls."""

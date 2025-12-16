@@ -62,14 +62,26 @@ def monthly_cashflow_forecast(session: Session, portfolio_id: int, months: int =
     """
     Enhanced forecasting with realistic dividend patterns and compound growth
     """
+    # Refresh session to ensure we see the latest holdings including newly added ones
+    session.expire_all()
+    
     holdings = session.exec(select(Holding).where(Holding.portfolio_id == portfolio_id)).all()
+    
+    # Debug logging
+    print(f"[Forecast] Found {len(holdings)} holdings for portfolio {portfolio_id}")
+    for h in holdings:
+        print(f"[Forecast] Holding: {h.symbol} ({h.shares} shares, id={h.id})")
+    
     if not holdings:
+        print(f"[Forecast] No holdings found for portfolio {portfolio_id}")
         return {"series": [], "total": 0.0, "scenarios": {}}
     
     symbols = [h.symbol for h in holdings]
+    print(f"[Forecast] Analyzing dividend patterns for symbols: {symbols}")
     
     # Analyze dividend patterns
     patterns = analyze_dividend_patterns(session, symbols)
+    print(f"[Forecast] Found dividend patterns for {len(patterns)} symbols: {list(patterns.keys())}")
     
     # Create date range using basic Python
     start = datetime.now().replace(day=1) if not start_date else datetime.combine(start_date, datetime.min.time())
@@ -100,7 +112,10 @@ def monthly_cashflow_forecast(session: Session, portfolio_id: int, months: int =
     for holding in holdings:
         symbol = holding.symbol
         if symbol not in patterns:
+            print(f"[Forecast] Warning: No dividend pattern found for {symbol}, skipping in forecast")
             continue
+        
+        print(f"[Forecast] Processing {symbol}: {holding.shares} shares, pattern: {patterns[symbol]}")
             
         pattern = patterns[symbol]
         shares = total_shares[symbol]
@@ -161,15 +176,19 @@ def monthly_cashflow_forecast(session: Session, portfolio_id: int, months: int =
             "has_dividend": monthly_amount > 0
         })
     
-    # Calculate scenarios
+    # Calculate scenarios - include all scenarios including the selected one
     total_income = sum(cash_flow)
     scenarios = {}
     for scenario_name, growth_rate in growth_rates.items():
         if scenario_name == growth_scenario:
-            continue
-            
-        scenario_total = total_income * (1 + growth_rate)
-        scenarios[scenario_name] = round(scenario_total, 2)
+            # For the selected scenario, use the actual calculated total
+            scenarios[scenario_name] = round(total_income, 2)
+        else:
+            # For other scenarios, calculate based on different growth rates
+            scenario_total = total_income * (1 + growth_rate)
+            scenarios[scenario_name] = round(scenario_total, 2)
+    
+    print(f"[Forecast] Total income: ${total_income:.2f}, Scenarios: {scenarios}")
     
     return {
         "series": series,
